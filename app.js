@@ -200,5 +200,5 @@ if(window.supabase?.createClient && window.SUPABASE_CONFIG?.url && window.SUPABA
 } else {
   state.accountMessage='登录服务未初始化。请检查 supabase-config.js 是否配置正确，以及网络能否加载 Supabase 客户端。';
 }
-fetch('内容库/library.json').then(r=>{if(!r.ok)throw Error('题库文件加载失败');return r.json()}).then(data=>{state.data=data;render()}).catch(err=>{document.getElementById('app').innerHTML='<div class="section"><div class="card" style="padding:24px">无法加载内容库。请通过本地服务器打开此网页（例如在项目目录运行 <code>python3 -m http.server</code>），不要直接使用 file://。</div></div>';console.error(err)});
+fetch('library.json').then(r=>{if(!r.ok)throw Error('题库文件加载失败');return r.json()}).then(data=>{state.data=data;render()}).catch(err=>{document.getElementById('app').innerHTML='<div class="section"><div class="card" style="padding:24px">无法加载内容库。请确认 library.json 与 index.html 位于同一目录，或通过本地服务器打开此网页；不要直接使用 file://。</div></div>';console.error(err)});
 
