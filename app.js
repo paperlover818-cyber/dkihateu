@@ -52,10 +52,12 @@ function md(value) {
   const tick=String.fromCharCode(96);
   s = s.replace(new RegExp(tick+'([^'+tick+']+)'+tick,'g'), (_, value) => {
     const looksLikeMath=/[\\_^{}=<>≤≥∈∀∃→↔∑∏∫√±×÷∞]/.test(value)||/^[A-Za-z](?:_[A-Za-z0-9]+)?$/.test(value);
-    return looksLikeMath?'\\('+value+'\\)':'<code>'+value+'</code>';
+    const displayFraction=/\\(?:d?frac|tfrac|binom)\b/.test(value);
+    return looksLikeMath?'\\('+(displayFraction?'\\displaystyle ':'')+value+'\\)':'<code>'+value+'</code>';
   });
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/\$\$([\s\S]+?)\$\$/g, '<div class="math-box">\\[$1\\]</div>');
+  s = s.replace(/\$([^$\n]+)\$/g, (_, value) => '\\('+( /\\(?:d?frac|tfrac|binom)\b/.test(value) ? '\\displaystyle ' : '' )+value+'\\)');
   return s.split(/\n{2,}/).map(block => /^<(h[34]|ul|div)/.test(block.trim()) ? block : '<p>'+block.replace(/\n/g,'<br>')+'</p>').join('');
 }
 function stars(n) { return '<span class="stars" aria-label="'+n+'颗星">'+'★'.repeat(n)+'☆'.repeat(5-n)+'</span>'; }
