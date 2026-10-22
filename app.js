@@ -34,6 +34,27 @@ function saveMastery(id, value) {
       .then(({error})=>{ if(error) console.error('云端进度保存失败',error); });
   }
 }
+function noteStorageKey(user = state.user) { return user?.id ? `math-analysis-notes:${user.id}` : 'math-analysis-notes'; }
+function loadLocalNote(id, user = state.user) {
+  try { return JSON.parse(localStorage.getItem(noteStorageKey(user)) || '{}')[id] || ''; }
+  catch (_) { return ''; }
+}
+function saveLocalNote(id, content, user = state.user) {
+  try { const notes=JSON.parse(localStorage.getItem(noteStorageKey(user)) || '{}'); notes[id]=content; localStorage.setItem(noteStorageKey(user),JSON.stringify(notes)); }
+  catch (_) { /* private browsing may disable storage; cloud save remains available */ }
+}
+async function loadNote(id, input, status) {
+  if(!state.supabase || !state.user) { input.value=loadLocalNote(id); status.textContent='未登录：笔记暂存在本机。登录后可跨设备同步。'; return; }
+  const {data,error}=await state.supabase.from('user_notes').select('content').eq('user_id',state.user.id).eq('question_id',id).maybeSingle();
+  if(error) { input.value=loadLocalNote(id); status.textContent='云端笔记尚未启用，请先执行项目中的建表 SQL。'; return; }
+  input.value=data?.content || ''; status.textContent='已加载账号笔记。';
+}
+async function saveNote(id, content, status) {
+  saveLocalNote(id,content);
+  if(!state.supabase || !state.user) { status.textContent='已保存到本机；登录后可同步到账号。'; return; }
+  const {error}=await state.supabase.from('user_notes').upsert({user_id:state.user.id,question_id:id,content,updated_at:new Date().toISOString()},{onConflict:'user_id,question_id'});
+  status.textContent=error?'云端保存失败：请确认已执行笔记建表 SQL。':'已保存到当前账号。';
+}
 async function loadCloudProgress() {
   if(!state.supabase || !state.user) return;
   const userId=state.user.id;
@@ -59,6 +80,9 @@ function normalizeMathOperators(value) {
   // Backtick formulas are authored in lightweight notation (e.g. `ln n`,
   // `lim_{n→∞}`). Typeset standard function names as operators, not variables.
   return value
+    // Use the clearer one-sided-limit notation in rendered formulas. The
+    // monotone-sequence notation (for example `u_N↓L`) is left untouched.
+    .replace(/\\downarrow\s*0/g, '\\to 0^+')
     .replace(/\\sqrt(?!\s*\{)([A-Za-z0-9])/g, (_, radicand) => `\\sqrt{${radicand}}`)
     .replace(/√([A-Za-z0-9])/g, (_, radicand) => `\\sqrt{${radicand}}`)
     .replace(/\\(pm|mp)([0-9]+)\/([0-9]+)/g, (_, sign, numerator, denominator) => `\\${sign}\\dfrac{${numerator}}{${denominator}}`)
@@ -146,7 +170,7 @@ function updateLibraryResults() {
 function detailView(id) {
   const q=state.data.questions.find(x=>x.id===id)||state.data.questions[0];
   const body=revealLabels.map(([key,label],i)=>'<details class="reveal" '+(i===0?'open':'')+'><summary><span class="reveal-index">0'+(i+1)+'</span>'+label+'</summary><div class="reveal-body markdown">'+md(q.sections[key])+'</div></details>').join('');
-  return '<div id="detail"><a class="back" href="#library">← 返回题库</a><div class="detail-header"><div class="detail-main"><div class="eyebrow">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.knowledge[0].split('/')[0])+'</div><h1 class="detail-title">'+escapeHtml(q.title)+'</h1><div class="detail-subtitle">'+questionSummary(q)+'</div><div class="detail-tags">'+q.tags.map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('')+'</div></div><aside class="detail-ratings card">'+ratingRows(q)+'</aside></div><div class="study-layout"><section class="study-column">'+body+'<section class="assistant-card card" id="study-assistant"><div class="assistant-heading"><div><span class="eyebrow">DEEPSEEK · BYOK</span><h2>这一步卡住了吗？</h2><p>助手会读取本题全部内容，包括尚未展开的部分。</p></div><span class="assistant-mark">✳</span></div><details class="assistant-key-settings"><summary>设置 DeepSeek API Key</summary><div class="assistant-key-row"><input id="deepseek-key" type="password" autocomplete="off" placeholder="粘贴你的 DeepSeek API Key"><button class="small-button" id="save-deepseek-key" type="button">本次会话使用</button><button class="text-button" id="clear-deepseek-key" type="button">清除</button></div><p class="assistant-privacy">密钥只保存在当前标签页会话中，关闭标签页后清除；不会写入题库或网站代码。提问时题目内容和问题会发送给 DeepSeek API。</p><div class="assistant-key-status" id="deepseek-key-status"></div></details><div class="assistant-focus"><label for="assistant-focus-text">聚焦内容（可选）</label><div class="assistant-focus-row"><textarea id="assistant-focus-text" rows="2" placeholder="选中答案里想问的文字，再点“引用选中文字”；也可以直接粘贴公式或句子。"></textarea><button class="small-button" id="capture-assistant-focus" type="button">引用选中文字</button></div></div><div class="assistant-chat" id="assistant-chat" aria-live="polite"><div class="assistant-empty">例如：“为什么这里可以用 Stolz 定理？”或“请把这一步展开说明。”</div></div><form class="assistant-compose" id="assistant-form"><textarea id="assistant-question" rows="2" required placeholder="告诉我你卡在哪一步…"></textarea><button class="small-button primary-button" type="submit">提问 ↗</button></form><div class="assistant-notice" id="assistant-notice" role="status"></div></section></section><aside><div class="side-card card"><h3>我的状态</h3><select class="mastery-select" id="detail-mastery">'+masteryOptions.map(o=>'<option '+(o===masteryOf(q)?'selected':'')+'>'+o+'</option>').join('')+'</select><div class="save-note">状态已按题目保存到本机浏览器。</div></div><div class="side-card card"><h3>知识点位置</h3>'+q.knowledge.map(k=>'<div class="side-row"><span>'+escapeHtml(k)+'</span></div>').join('')+'</div><div class="side-card card"><h3>来源与核对</h3><div class="side-row"><span>资料</span><b>'+escapeHtml(q.sources.join('；'))+'</b></div><div class="side-row"><span>页码</span><b>'+escapeHtml(q.source_pages)+'</b></div></aside></div></div>';
+  return '<div id="detail"><a class="back" href="#library">← 返回题库</a><div class="detail-header"><div class="detail-main"><div class="eyebrow">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.knowledge[0].split('/')[0])+'</div><h1 class="detail-title">'+escapeHtml(q.title)+'</h1><div class="detail-subtitle">'+questionSummary(q)+'</div><div class="detail-tags">'+q.tags.map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('')+'</div></div><aside class="detail-ratings card">'+ratingRows(q)+'</aside></div><div class="study-layout"><section class="study-column">'+body+'<section class="assistant-card card" id="study-assistant"><div class="assistant-heading"><div><span class="eyebrow">DEEPSEEK · BYOK</span><h2>这一步卡住了吗？</h2><p>助手会读取本题全部内容，包括尚未展开的部分。</p></div><span class="assistant-mark">✳</span></div><details class="assistant-key-settings"><summary>设置 DeepSeek API Key</summary><div class="assistant-key-row"><input id="deepseek-key" type="password" autocomplete="off" placeholder="粘贴你的 DeepSeek API Key"><button class="small-button" id="save-deepseek-key" type="button">本次会话使用</button><button class="text-button" id="clear-deepseek-key" type="button">清除</button></div><p class="assistant-privacy">密钥只保存在当前标签页会话中，关闭标签页后清除；不会写入题库或网站代码。提问时题目内容和问题会发送给 DeepSeek API。</p><div class="assistant-key-status" id="deepseek-key-status"></div></details><div class="assistant-focus"><label for="assistant-focus-text">聚焦内容（可选）</label><div class="assistant-focus-row"><textarea id="assistant-focus-text" rows="2" placeholder="选中答案里想问的文字，再点“引用选中文字”；也可以直接粘贴公式或句子。"></textarea><button class="small-button" id="capture-assistant-focus" type="button">引用选中文字</button></div></div><div class="assistant-chat" id="assistant-chat" aria-live="polite"><div class="assistant-empty">例如：“为什么这里可以用 Stolz 定理？”或“请把这一步展开说明。”</div></div><form class="assistant-compose" id="assistant-form"><textarea id="assistant-question" rows="2" required placeholder="告诉我你卡在哪一步…"></textarea><button class="small-button primary-button" type="submit">提问 ↗</button></form><div class="assistant-notice" id="assistant-notice" role="status"></div></section></section><aside><div class="side-card card"><h3>我的状态</h3><select class="mastery-select" id="detail-mastery">'+masteryOptions.map(o=>'<option '+(o===masteryOf(q)?'selected':'')+'>'+o+'</option>').join('')+'</select><div class="save-note">状态已按题目保存到本机浏览器。</div></div><div class="side-card card note-card"><h3>我的笔记</h3><textarea id="question-note" rows="7" placeholder="记录这道题的疑问、易错点或自己的解法……"></textarea><button class="small-button primary-button" id="save-question-note" type="button">保存笔记</button><div class="note-status" id="note-status" role="status"></div></div><div class="side-card card"><h3>知识点位置</h3>'+q.knowledge.map(k=>'<div class="side-row"><span>'+escapeHtml(k)+'</span></div>').join('')+'</div><div class="side-card card"><h3>来源与核对</h3><div class="side-row"><span>资料</span><b>'+escapeHtml(q.sources.join('；'))+'</b></div><div class="side-row"><span>页码</span><b>'+escapeHtml(q.source_pages)+'</b></div></aside></div></div>';
 }
 function reviewView() {
   const qs=state.data.questions.filter(q=>masteryOf(q)==='我没有完全看懂'||masteryOf(q)==='我看懂了但无法复述');
@@ -182,6 +206,12 @@ function bindDetail() {
   const select=document.getElementById('detail-mastery');
   const id=location.hash.slice(1).split('?')[0].slice(8);
   if(select) select.onchange=e=>{ saveMastery(id,e.target.value); };
+  const noteInput=document.getElementById('question-note');
+  const noteStatus=document.getElementById('note-status');
+  if(noteInput && noteStatus){
+    loadNote(id,noteInput,noteStatus);
+    document.getElementById('save-question-note')?.addEventListener('click',()=>saveNote(id,noteInput.value,noteStatus));
+  }
   const assistant=document.getElementById('study-assistant');
   if(assistant){
     assistant.classList.add('assistant-window');
