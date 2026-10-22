@@ -43,6 +43,11 @@ async function loadCloudProgress() {
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+function stackSlashFractions(value) {
+  const indexed='[A-Za-z0-9]+(?:_\\{[^{}]+\\}|_[A-Za-z0-9]+)?(?:\\^\\{[^{}]+\\}|\\^[A-Za-z0-9]+)?';
+  const atom='(?:\\([^()]*\\)|\\\\[A-Za-z]+(?:\\s+[A-Za-z]+)?|'+indexed+')';
+  return value.replace(new RegExp('('+atom+')\\s*/\\s*('+atom+')','g'),'\\dfrac{$1}{$2}');
+}
 function md(value) {
   let s = escapeHtml(value);
   s = s.replace(/^### (.+)$/gm, '<h4>$1</h4>').replace(/^## (.+)$/gm, '<h3>$1</h3>');
@@ -52,18 +57,23 @@ function md(value) {
   const tick=String.fromCharCode(96);
   s = s.replace(new RegExp(tick+'([^'+tick+']+)'+tick,'g'), (_, value) => {
     const looksLikeMath=/[\\_^{}=<>≤≥∈∀∃→↔∑∏∫√±×÷∞]/.test(value)||/^[A-Za-z](?:_[A-Za-z0-9]+)?$/.test(value);
-    const displayFraction=/\\(?:d?frac|tfrac|binom)\b/.test(value);
-    return looksLikeMath?'\\('+(displayFraction?'\\displaystyle ':'')+value+'\\)':'<code>'+value+'</code>';
+    const formula=stackSlashFractions(value);
+    const isMath=looksLikeMath||formula!==value;
+    return isMath?'\\('+formula+'\\)':'<code>'+value+'</code>';
   });
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/\$\$([\s\S]+?)\$\$/g, '<div class="math-box">\\[$1\\]</div>');
-  s = s.replace(/\$([^$\n]+)\$/g, (_, value) => '\\('+( /\\(?:d?frac|tfrac|binom)\b/.test(value) ? '\\displaystyle ' : '' )+value+'\\)');
+  s = s.replace(/\$([^$\n]+)\$/g, (_, value) => '\\('+stackSlashFractions(value)+'\\)');
   return s.split(/\n{2,}/).map(block => /^<(h[34]|ul|div)/.test(block.trim()) ? block : '<p>'+block.replace(/\n/g,'<br>')+'</p>').join('');
 }
 function stars(n) { return '<span class="stars" aria-label="'+n+'颗星">'+'★'.repeat(n)+'☆'.repeat(5-n)+'</span>'; }
 function ratingRows(p) { const r=p.ratings; return '<div class="rating-row"><span>难度</span>'+stars(r.difficulty)+'</div><div class="rating-row"><span>重要性</span>'+stars(r.importance)+'</div><div class="rating-row"><span>复现概率（暂定）</span>'+stars(r.exam_probability)+'</div>'; }
 function topicRoots() { return ['全部知识板块', ...new Set(state.data.questions.flatMap(q => q.knowledge.map(k => k.split('/')[0])))]; }
-function questionSummary(q) { return q.sections.problem.replace(/[$#*_]/g,'').replace(/\s+/g,' ').slice(0,150); }
+function questionSummary(q) {
+  // Keep the complete problem statement in cards and the detail header, including
+  // a target expression that may live in its own paragraph.
+  return md(q.sections.problem.replace(/\s+/g, ' ').trim());
+}
 function compactSearch(value) {
   return String(value ?? '').toLowerCase().replace(/[\s，。、“”‘’：:；;、/\\_\-]+/g, '');
 }
@@ -93,12 +103,12 @@ function matches(q) {
     (!f.ratings.exam_probability||q.ratings.exam_probability>=4);
 }
 function problemCard(q) {
-  return '<article class="problem-card card"><a class="problem-link" href="#problem/'+q.id+'"><div class="problem-title">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.title)+'</div><div class="problem-summary">'+escapeHtml(questionSummary(q))+'</div><div class="problem-meta"><span class="week-tag">第'+q.week+'周</span>'+q.knowledge.slice(0,2).map(k=>'<span class="tag">'+escapeHtml(k.split('/').at(-1))+'</span>').join('')+'<span class="mastery-tag">'+escapeHtml(masteryOf(q))+'</span></div></a><div class="rating-stack"><div>难度 '+stars(q.ratings.difficulty)+'</div><div>重要性 '+stars(q.ratings.importance)+'</div><div>复现 '+stars(q.ratings.exam_probability)+'</div></div></article>';
+  return '<article class="problem-card card"><a class="problem-link" href="#problem/'+q.id+'"><div class="problem-title">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.title)+'</div><div class="problem-summary">'+questionSummary(q)+'</div><div class="problem-meta"><span class="week-tag">第'+q.week+'周</span>'+q.knowledge.slice(0,2).map(k=>'<span class="tag">'+escapeHtml(k.split('/').at(-1))+'</span>').join('')+'<span class="mastery-tag">'+escapeHtml(masteryOf(q))+'</span></div></a><div class="rating-stack"><div>难度 '+stars(q.ratings.difficulty)+'</div><div>重要性 '+stars(q.ratings.importance)+'</div><div>复现 '+stars(q.ratings.exam_probability)+'</div></div></article>';
 }
 function header(title, subtitle) { return '<div class="eyebrow">数学分析 · 个人题库</div><h1>'+title+'</h1><p class="hero-copy p">'+subtitle+'</p>'; }
 function homeView() {
   const qs=state.data.questions, featured=qs.find(q=>q.id==='w02-q11')||qs[0], mastered=qs.filter(q=>masteryOf(q)==='我完全掌握了').length, assessed=qs.filter(q=>masteryOf(q)!=='尚未评估').length, progress=Math.round(mastered/qs.length*100);
-  return '<div id="home"><section class="hero"><div class="hero-copy">'+header('把每一道题，变成自己的工具。','完整题库已接入：按知识、掌握程度和三维星级复习。')+'</div><div class="progress-card"><div class="progress-top"><span>题库进度</span><span>'+assessed+'/'+qs.length+' 已标记</span></div><div class="progress-number">'+progress+'% 完全掌握</div><div class="progress-track"><div class="progress-fill" style="width:'+progress+'%"></div></div></div></section><section class="section"><div class="section-head"><div><h2>继续学习</h2><p>从一道完整题目开始</p></div><a class="small-button" href="#library">查看全部题目 →</a></div><div class="continue-grid"><a class="continue-card featured card" href="#problem/'+featured.id+'"><div><div class="card-meta"><span>第'+featured.week+'周 · 第'+featured.question_number+'题</span><span>推荐</span></div><div class="card-title">'+escapeHtml(featured.title)+'</div><div class="card-description">'+escapeHtml(questionSummary(featured))+'</div></div><div class="card-bottom"><span class="status-pill">'+escapeHtml(masteryOf(featured))+'</span><span class="mini-arrow">↗</span></div></a></div></section><section class="section"><div class="section-head"><div><h2>从这里开始</h2><p>四种进入方式</p></div></div><div class="tool-grid"><a class="tool-card card" href="#random"><div class="tool-icon">⌁</div><h3>从这里开始</h3><p>从前三级掌握状态中随机抽一道题。</p></a><a class="tool-card card" href="#library"><div class="tool-icon">⌘</div><h3>按知识找题</h3><p>按三级知识路径查找完整题目。</p></a><a class="tool-card card" href="#library?ratings=need"><div class="tool-icon">↻</div><h3>按需要练习</h3><p>按掌握程度与三维星级筛选。</p></a><a class="tool-card card" href="#review"><div class="tool-icon">✦</div><h3>我的复习</h3><p>集中查看前两级掌握状态的题目。</p></a></div></section><section class="section"><div class="card" style="padding:20px"><div class="library-top"><span class="week-tag">已接入</span><span class="muted" style="font-size:13px">'+qs.length+' 道题 · '+state.data.knowledge_index.length+' 条三级知识路径</span></div></div></section></div>';
+  return '<div id="home"><section class="hero"><div class="hero-copy">'+header('把每一道题，变成自己的工具。','完整题库已接入：按知识、掌握程度和三维星级复习。')+'</div><div class="progress-card"><div class="progress-top"><span>题库进度</span><span>'+assessed+'/'+qs.length+' 已标记</span></div><div class="progress-number">'+progress+'% 完全掌握</div><div class="progress-track"><div class="progress-fill" style="width:'+progress+'%"></div></div></div></section><section class="section"><div class="section-head"><div><h2>继续学习</h2><p>从一道完整题目开始</p></div><a class="small-button" href="#library">查看全部题目 →</a></div><div class="continue-grid"><a class="continue-card featured card" href="#problem/'+featured.id+'"><div><div class="card-meta"><span>第'+featured.week+'周 · 第'+featured.question_number+'题</span><span>推荐</span></div><div class="card-title">'+escapeHtml(featured.title)+'</div><div class="card-description">'+questionSummary(featured)+'</div></div><div class="card-bottom"><span class="status-pill">'+escapeHtml(masteryOf(featured))+'</span><span class="mini-arrow">↗</span></div></a></div></section><section class="section"><div class="section-head"><div><h2>从这里开始</h2><p>四种进入方式</p></div></div><div class="tool-grid"><a class="tool-card card" href="#random"><div class="tool-icon">⌁</div><h3>从这里开始</h3><p>从前三级掌握状态中随机抽一道题。</p></a><a class="tool-card card" href="#library"><div class="tool-icon">⌘</div><h3>按知识找题</h3><p>按三级知识路径查找完整题目。</p></a><a class="tool-card card" href="#library?ratings=need"><div class="tool-icon">↻</div><h3>按需要练习</h3><p>按掌握程度与三维星级筛选。</p></a><a class="tool-card card" href="#review"><div class="tool-icon">✦</div><h3>我的复习</h3><p>集中查看前两级掌握状态的题目。</p></a></div></section><section class="section"><div class="card" style="padding:20px"><div class="library-top"><span class="week-tag">已接入</span><span class="muted" style="font-size:13px">'+qs.length+' 道题 · '+state.data.knowledge_index.length+' 条三级知识路径</span></div></div></section></div>';
 }
 function libraryView() {
   const shown=state.data.questions.filter(matches), topics=topicRoots();
@@ -110,13 +120,14 @@ function updateLibraryResults() {
   if(!list||!count) return;
   const shown=state.data.questions.filter(matches);
   list.innerHTML=shown.length?shown.map(problemCard).join(''):'<div class="card empty-state">没有符合筛选条件的题目。<br><br><button class="small-button" id="clear-filters">清除筛选</button></div>';
+  if(window.MathJax?.typesetPromise) window.MathJax.typesetPromise([list]).catch(error=>console.error('数学公式排版失败',error));
   count.textContent='显示 '+shown.length+' / '+state.data.questions.length+' 道题';
   document.getElementById('clear-filters')?.addEventListener('click',()=>{state.filters={topic:'全部知识板块',mastery:'全部掌握状态',search:'',ratings:{difficulty:false,importance:false,exam_probability:false}};render()});
 }
 function detailView(id) {
   const q=state.data.questions.find(x=>x.id===id)||state.data.questions[0];
   const body=revealLabels.map(([key,label],i)=>'<details class="reveal" '+(i===0?'open':'')+'><summary><span class="reveal-index">0'+(i+1)+'</span>'+label+'</summary><div class="reveal-body markdown">'+md(q.sections[key])+'</div></details>').join('');
-  return '<div id="detail"><a class="back" href="#library">← 返回题库</a><div class="detail-header"><div class="detail-main"><div class="eyebrow">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.knowledge[0].split('/')[0])+'</div><h1 class="detail-title">'+escapeHtml(q.title)+'</h1><p class="detail-subtitle">'+escapeHtml(questionSummary(q))+'</p><div class="detail-tags">'+q.tags.map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('')+'</div></div><aside class="detail-ratings card">'+ratingRows(q)+'</aside></div><div class="study-layout"><section class="study-column">'+body+'</section><aside><div class="side-card card"><h3>我的状态</h3><select class="mastery-select" id="detail-mastery">'+masteryOptions.map(o=>'<option '+(o===masteryOf(q)?'selected':'')+'>'+o+'</option>').join('')+'</select><div class="save-note">状态已按题目保存到本机浏览器。</div></div><div class="side-card card"><h3>知识点位置</h3>'+q.knowledge.map(k=>'<div class="side-row"><span>'+escapeHtml(k)+'</span></div>').join('')+'</div><div class="side-card card"><h3>来源与核对</h3><div class="side-row"><span>资料</span><b>'+escapeHtml(q.sources.join('；'))+'</b></div><div class="side-row"><span>页码</span><b>'+escapeHtml(q.source_pages)+'</b></div></div></aside></div></div>';
+  return '<div id="detail"><a class="back" href="#library">← 返回题库</a><div class="detail-header"><div class="detail-main"><div class="eyebrow">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.knowledge[0].split('/')[0])+'</div><h1 class="detail-title">'+escapeHtml(q.title)+'</h1><div class="detail-subtitle">'+questionSummary(q)+'</div><div class="detail-tags">'+q.tags.map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('')+'</div></div><aside class="detail-ratings card">'+ratingRows(q)+'</aside></div><div class="study-layout"><section class="study-column">'+body+'</section><aside><div class="side-card card"><h3>我的状态</h3><select class="mastery-select" id="detail-mastery">'+masteryOptions.map(o=>'<option '+(o===masteryOf(q)?'selected':'')+'>'+o+'</option>').join('')+'</select><div class="save-note">状态已按题目保存到本机浏览器。</div></div><div class="side-card card"><h3>知识点位置</h3>'+q.knowledge.map(k=>'<div class="side-row"><span>'+escapeHtml(k)+'</span></div>').join('')+'</div><div class="side-card card"><h3>来源与核对</h3><div class="side-row"><span>资料</span><b>'+escapeHtml(q.sources.join('；'))+'</b></div><div class="side-row"><span>页码</span><b>'+escapeHtml(q.source_pages)+'</b></div></div></aside></div></div>';
 }
 function reviewView() {
   const qs=state.data.questions.filter(q=>masteryOf(q)==='我没有完全看懂'||masteryOf(q)==='我看懂了但无法复述');
