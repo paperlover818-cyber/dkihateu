@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数分 · 习题学习台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#home" aria-label="返回首页"><span class="brand-mark">∫</span><span>数分 · 习题学习台</span></a>
+      <nav class="topnav" aria-label="主导航">
+        <a data-nav="home" href="#home">首页</a>
+        <a data-nav="library" href="#library">题库</a>
+        <a data-nav="review" href="#review">我的复习</a>
+      </nav>
+      <div class="top-actions"><button class="icon-button" id="search-trigger" title="打开题库搜索" aria-label="打开题库搜索">⌕</button><button class="account-button" id="account-trigger">登录</button></div>
+    </header>
+
+    <main id="app" class="main-content"></main>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
