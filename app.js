@@ -11,6 +11,7 @@ const revealLabels = [['problem', '题目'], ['hint', '大致思路'], ['framewo
 const LAST_VIEWED_QUESTION_KEY = 'math-analysis-last-viewed-question';
 const DEEPSEEK_KEY_STORAGE = 'math-analysis-deepseek-key-session';
 let assistantFocusText = '';
+let formulaPickerHandler = null;
 
 function loadProgress() {
   try { return JSON.parse(localStorage.getItem('math-analysis-progress') || '{}'); }
@@ -181,6 +182,19 @@ function bindDetail() {
   const select=document.getElementById('detail-mastery');
   const id=location.hash.slice(1).split('?')[0].slice(8);
   if(select) select.onchange=e=>{ saveMastery(id,e.target.value); };
+  const assistant=document.getElementById('study-assistant');
+  if(assistant){
+    assistant.classList.add('assistant-window');
+    document.getElementById('assistant-orb')?.remove();
+    const orb=document.createElement('button');orb.type='button';orb.className='assistant-orb';orb.id='assistant-orb';orb.setAttribute('aria-label','打开数学分析 AI 助手');orb.setAttribute('aria-expanded','false');orb.innerHTML='<span>✳</span><small>AI</small>';
+    const close=document.createElement('button');close.type='button';close.className='assistant-close';close.setAttribute('aria-label','关闭助手窗口');close.textContent='×';
+    assistant.querySelector('.assistant-heading')?.append(close);
+    document.body.append(orb);
+    const setOpen=open=>{assistant.classList.toggle('is-open',open);orb.setAttribute('aria-expanded',String(open));if(open)document.getElementById('assistant-question')?.focus()};
+    orb.addEventListener('click',()=>setOpen(!assistant.classList.contains('is-open')));
+    close.addEventListener('click',()=>setOpen(false));
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&assistant.classList.contains('is-open'))setOpen(false)});
+  }
   const keyInput=document.getElementById('deepseek-key');
   const keyStatus=document.getElementById('deepseek-key-status');
   const savedKey=()=>{try{return sessionStorage.getItem(DEEPSEEK_KEY_STORAGE)||''}catch(_){return ''}};
@@ -202,6 +216,33 @@ function bindDetail() {
     if(selected){focus.value=selected;assistantFocusText=selected;document.getElementById('assistant-notice').textContent='已引用选中文字。'}
     else document.getElementById('assistant-notice').textContent='请先在题目或答案中选中一段文字，再点击此按钮。';
   });
+  const focusRow=document.querySelector('.assistant-focus-row');
+  if(focusRow){
+    const pickButton=document.createElement('button');pickButton.type='button';pickButton.id='toggle-formula-picker';pickButton.className='small-button';pickButton.textContent='点选公式聚焦';focusRow.append(pickButton);
+    pickButton.addEventListener('click',()=>{
+      const active=document.body.classList.toggle('formula-pick-mode');
+      pickButton.classList.toggle('is-active',active);
+      pickButton.textContent=active?'退出公式点选':'点选公式聚焦';
+      document.getElementById('assistant-notice').textContent=active?'现在点击题目或答案中的公式，即可将整条公式加入聚焦内容。':'已退出公式点选模式。';
+    });
+    if(formulaPickerHandler)document.removeEventListener('click',formulaPickerHandler,true);
+    formulaPickerHandler=event=>{
+      if(!document.body.classList.contains('formula-pick-mode'))return;
+      const formula=event.target.closest('.reveal-body mjx-container');
+      if(!formula)return;
+      event.preventDefault();event.stopPropagation();
+      let tex='';
+      try{const mathItems=window.MathJax?.startup?.document?.getMathItemsWithin(formula);if(mathItems?.length)tex=mathItems[0].math||''}catch(_){}
+      if(!tex)tex=formula.getAttribute('aria-label')||formula.textContent.trim();
+      const formatted=tex.startsWith('\\(')||tex.startsWith('\\[')?tex:'\\('+tex+'\\)';
+      const focus=document.getElementById('assistant-focus-text');
+      focus.value=focus.value.trim()?focus.value.trim()+'\n'+formatted:formatted;
+      assistantFocusText=focus.value;
+      document.body.classList.remove('formula-pick-mode');pickButton.classList.remove('is-active');pickButton.textContent='点选公式聚焦';
+      document.getElementById('assistant-notice').textContent='已将公式加入聚焦内容。';
+    };
+    document.addEventListener('click',formulaPickerHandler,true);
+  }
   const form=document.getElementById('assistant-form');
   const chat=document.getElementById('assistant-chat');
   const notice=document.getElementById('assistant-notice');
