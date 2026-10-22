@@ -274,7 +274,8 @@ function bindDetail() {
       if(!response.ok)throw new Error(data.error?.message||('HTTP '+response.status));
       const answer=data.choices?.[0]?.message?.content;
       if(!answer)throw new Error('接口没有返回回答内容。');
-      pending.textContent=answer;
+      pending.innerHTML=md(answer);
+      if(window.MathJax?.typesetPromise) await window.MathJax.typesetPromise([pending]);
     }catch(error){
       pending.textContent='请求失败：'+error.message+'。如果是浏览器网络/CORS 错误，当前静态网页可能无法直接连接 API；可检查密钥和网络，或后续改用仅供个人部署的代理服务。';
     }finally{send.disabled=false;document.getElementById('assistant-question').value='';}
