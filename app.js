@@ -13,10 +13,17 @@ function loadProgress() {
   try { return JSON.parse(localStorage.getItem('math-analysis-progress') || '{}'); }
   catch (_) { return {}; }
 }
+function progressStorageKey(user = state.user) {
+  return user?.id ? `math-analysis-progress:${user.id}` : 'math-analysis-progress';
+}
+function loadScopedProgress(user = state.user) {
+  try { return JSON.parse(localStorage.getItem(progressStorageKey(user)) || '{}'); }
+  catch (_) { return {}; }
+}
 function masteryOf(q) { return state.progress[q.id] || q.default_mastery; }
 function saveMastery(id, value) {
   state.progress[id] = value;
-  try { localStorage.setItem('math-analysis-progress', JSON.stringify(state.progress)); }
+  try { localStorage.setItem(progressStorageKey(), JSON.stringify(state.progress)); }
   catch (_) { /* private browsing may disable storage; keep this session usable */ }
   if(state.supabase && state.user) {
     state.supabase.from('user_progress').upsert({user_id:state.user.id,question_id:id,mastery:value,updated_at:new Date().toISOString()},{onConflict:'user_id,question_id'})
@@ -25,16 +32,12 @@ function saveMastery(id, value) {
 }
 async function loadCloudProgress() {
   if(!state.supabase || !state.user) return;
-  const {data,error}=await state.supabase.from('user_progress').select('question_id,mastery');
+  const userId=state.user.id;
+  const {data,error}=await state.supabase.from('user_progress').select('question_id,mastery').eq('user_id',userId);
   if(error) { state.accountMessage='云端进度读取失败：'+error.message; return; }
-  const remoteIds=new Set((data||[]).map(row=>row.question_id));
-  for(const row of data||[]) state.progress[row.question_id]=row.mastery;
-  try { localStorage.setItem('math-analysis-progress',JSON.stringify(state.progress)); } catch (_) {}
-  const localOnly=Object.entries(state.progress).filter(([id])=>!remoteIds.has(id)).map(([question_id,mastery])=>({user_id:state.user.id,question_id,mastery}));
-  if(localOnly.length) {
-    const {error:uploadError}=await state.supabase.from('user_progress').upsert(localOnly,{onConflict:'user_id,question_id'});
-    if(uploadError) console.error('本机进度迁移到云端失败',uploadError);
-  }
+  if(state.user?.id!==userId) return;
+  state.progress=Object.fromEntries((data||[]).map(row=>[row.question_id,row.mastery]));
+  try { localStorage.setItem(progressStorageKey(state.user),JSON.stringify(state.progress)); } catch (_) {}
 }
 
 function escapeHtml(value) {
@@ -188,11 +191,13 @@ if(window.supabase?.createClient && window.SUPABASE_CONFIG?.url && window.SUPABA
   state.supabase.auth.getSession().then(async({data,error})=>{
     if(error) console.error('登录状态读取失败',error);
     state.user=data?.session?.user||null;
+    state.progress=loadScopedProgress();
     await loadCloudProgress();
     render();
   });
   state.supabase.auth.onAuthStateChange((_event,session)=>{
     state.user=session?.user||null;
+    state.progress=loadScopedProgress();
     if(state.user) state.accountMessage='已登录，正在同步进度…';
     render();
     if(state.user) setTimeout(()=>loadCloudProgress().then(()=>{state.accountMessage='云端进度同步完成。';render()}),0);
