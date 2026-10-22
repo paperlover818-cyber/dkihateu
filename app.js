@@ -4,14 +4,34 @@ const state = {
   user: null,
   supabase: null,
   accountMessage: '',
-  filters: { topic: '全部知识板块', mastery: '全部掌握状态', search: '', ratings: { difficulty: false, importance: false, exam_probability: false } }
+  noteIds: new Set(),
+  filters: { topic: '全部知识板块', mastery: '全部掌握状态', search: '', notesOnly: false, ratings: { difficulty: false, importance: false, exam_probability: false } }
 };
 const masteryOptions = ['尚未评估', '我没有完全看懂', '我看懂了但无法复述', '我可以复述', '我完全掌握了'];
 const revealLabels = [['problem', '题目'], ['hint', '大致思路'], ['framework', '思维推进框架'], ['solution', '完整答案'], ['reflection', '反思收获']];
 const LAST_VIEWED_QUESTION_KEY = 'math-analysis-last-viewed-question';
 const DEEPSEEK_KEY_STORAGE = 'math-analysis-deepseek-key-session';
+const THEME_OPTIONS = [['blue','蓝灰'],['macaron','马卡龙'],['violet','紫罗兰'],['pink','淡粉'],['mono','黑灰白渐变'],['mint','薄荷绿'],['halloween','万圣节'],['christmas','圣诞节'],['valentines','情人节'],['easter','复活节'],['lunar-new-year','春节'],['mid-autumn','中秋节'],['thanksgiving','感恩节'],['pride-rainbow','彩虹骄傲'],['pride-lesbian','女同性恋骄傲'],['pride-bi','双性恋骄傲'],['pride-pan','泛性恋骄傲'],['pride-trans','跨性别骄傲'],['pride-ace','无性恋骄傲'],['pride-aro','无浪漫倾向骄傲'],['pride-nonbinary','非二元性别骄傲'],['pride-intersex','双性人骄傲']];
+const THEME_GROUPS = [
+  ['基础主题', THEME_OPTIONS.slice(0, 6)],
+  ['节日主题', THEME_OPTIONS.slice(6, 13)],
+  ['性少数骄傲主题', THEME_OPTIONS.slice(13)]
+];
+const THEME_STORAGE_KEY = 'math-analysis-theme';
 let assistantFocusText = '';
 let formulaPickerHandler = null;
+
+function themeStorageKey(user = state.user) { return user?.id ? `${THEME_STORAGE_KEY}:${user.id}` : THEME_STORAGE_KEY; }
+function loadTheme(user = state.user) {
+  const cloudTheme=user?.user_metadata?.theme;
+  if(THEME_OPTIONS.some(([key])=>key===cloudTheme)) return cloudTheme;
+  try { return localStorage.getItem(themeStorageKey(user)) || 'blue'; } catch (_) { return 'blue'; }
+}
+function applyTheme(theme = loadTheme()) {
+  const valid=THEME_OPTIONS.some(([key])=>key===theme) ? theme : 'blue';
+  document.documentElement.dataset.theme=valid;
+}
+function themeSelect() { return '<div class="theme-setting"><span>页面配色</span><nav class="theme-nav" aria-label="页面配色分类">'+THEME_GROUPS.map(([group, options],i)=>'<details class="theme-group" '+(i===0?'open':'')+'><summary>'+group+'</summary><div class="theme-nav-panel">'+options.map(([key,label])=>'<button type="button" class="theme-choice" data-theme-choice="'+key+'">'+label+'</button>').join('')+'</div></details>').join('')+'</nav></div>'; }
 
 function loadProgress() {
   try { return JSON.parse(localStorage.getItem('math-analysis-progress') || '{}'); }
@@ -43,6 +63,18 @@ function saveLocalNote(id, content, user = state.user) {
   try { const notes=JSON.parse(localStorage.getItem(noteStorageKey(user)) || '{}'); notes[id]=content; localStorage.setItem(noteStorageKey(user),JSON.stringify(notes)); }
   catch (_) { /* private browsing may disable storage; cloud save remains available */ }
 }
+function refreshLocalNoteIds() {
+  const notes=(()=>{try{return JSON.parse(localStorage.getItem(noteStorageKey()) || '{}')}catch(_){return {}}})();
+  state.noteIds=new Set(Object.entries(notes).filter(([,content])=>String(content||'').trim()).map(([id])=>id));
+}
+function hasNote(q) { return state.noteIds.has(q.id) || !!loadLocalNote(q.id).trim(); }
+async function loadCloudNotes() {
+  refreshLocalNoteIds();
+  if(!state.supabase || !state.user) return;
+  const {data,error}=await state.supabase.from('user_notes').select('question_id,content').eq('user_id',state.user.id);
+  if(error) return;
+  state.noteIds=new Set((data||[]).filter(row=>String(row.content||'').trim()).map(row=>row.question_id));
+}
 async function loadNote(id, input, status) {
   if(!state.supabase || !state.user) { input.value=loadLocalNote(id); status.textContent='未登录：笔记暂存在本机。登录后可跨设备同步。'; return; }
   const {data,error}=await state.supabase.from('user_notes').select('content').eq('user_id',state.user.id).eq('question_id',id).maybeSingle();
@@ -51,6 +83,7 @@ async function loadNote(id, input, status) {
 }
 async function saveNote(id, content, status) {
   saveLocalNote(id,content);
+  if(String(content||'').trim()) state.noteIds.add(id); else state.noteIds.delete(id);
   if(!state.supabase || !state.user) { status.textContent='已保存到本机；登录后可同步到账号。'; return; }
   const {error}=await state.supabase.from('user_notes').upsert({user_id:state.user.id,question_id:id,content,updated_at:new Date().toISOString()},{onConflict:'user_id,question_id'});
   status.textContent=error?'云端保存失败：请确认已执行笔记建表 SQL。':'已保存到当前账号。';
@@ -140,13 +173,14 @@ function matches(q) {
   const f=state.filters;
   return (f.topic==='全部知识板块'||q.knowledge.some(k=>k.startsWith(f.topic+'/'))) &&
     (f.mastery==='全部掌握状态'||masteryOf(q)===f.mastery) &&
+    (!f.notesOnly||hasNote(q)) &&
     matchesSearch(q, f.search) &&
     (!f.ratings.difficulty||q.ratings.difficulty<=3) &&
     (!f.ratings.importance||q.ratings.importance>=4) &&
     (!f.ratings.exam_probability||q.ratings.exam_probability>=4);
 }
 function problemCard(q) {
-  return '<article class="problem-card card"><a class="problem-link" href="#problem/'+q.id+'"><div class="problem-title">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.title)+'</div><div class="problem-summary">'+questionSummary(q)+'</div><div class="problem-meta"><span class="week-tag">第'+q.week+'周</span>'+q.knowledge.slice(0,2).map(k=>'<span class="tag">'+escapeHtml(k.split('/').at(-1))+'</span>').join('')+'<span class="mastery-tag">'+escapeHtml(masteryOf(q))+'</span></div></a><div class="rating-stack"><div>难度 '+stars(q.ratings.difficulty)+'</div><div>重要性 '+stars(q.ratings.importance)+'</div><div>复现 '+stars(q.ratings.exam_probability)+'</div></div></article>';
+  return '<article class="problem-card card"><a class="problem-link" href="#problem/'+q.id+'"><div class="problem-title">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.title)+'</div><div class="problem-summary">'+questionSummary(q)+'</div><div class="problem-meta"><span class="week-tag">第'+q.week+'周</span>'+q.knowledge.slice(0,2).map(k=>'<span class="tag">'+escapeHtml(k.split('/').at(-1))+'</span>').join('')+'<span class="mastery-tag">'+escapeHtml(masteryOf(q))+'</span>'+(hasNote(q)?'<span class="note-tag">有笔记</span>':'')+'</div></a><div class="rating-stack"><div>难度 '+stars(q.ratings.difficulty)+'</div><div>重要性 '+stars(q.ratings.importance)+'</div><div>复现 '+stars(q.ratings.exam_probability)+'</div></div></article>';
 }
 function header(title, subtitle) { return '<div class="eyebrow">数学分析·题库 by paperlover</div><h1>'+title+'</h1><p class="hero-copy p">'+subtitle+'</p>'; }
 function homeView() {
@@ -155,7 +189,7 @@ function homeView() {
 }
 function libraryView() {
   const shown=state.data.questions.filter(matches), topics=topicRoots();
-  return '<div id="library">'+header('题库','我们已经做了这么多题了咩？？！！')+'<div class="library-layout section"><aside class="filters card"><h3>筛选题目</h3><div class="filter-group"><label class="filter-label">知识板块</label><select id="topic-filter" class="filter-select">'+topics.map(o=>'<option '+(o===state.filters.topic?'selected':'')+'>'+escapeHtml(o)+'</option>').join('')+'</select></div><div class="filter-group"><label class="filter-label">掌握程度</label><select id="mastery-filter" class="filter-select"><option>全部掌握状态</option>'+masteryOptions.map(o=>'<option '+(o===state.filters.mastery?'selected':'')+'>'+o+'</option>').join('')+'</select></div><div class="filter-group"><span class="filter-label">三维评级</span><label class="check-item"><input type="checkbox" data-rating="importance" '+(state.filters.ratings.importance?'checked':'')+'> 重要性 ≥ 4 星</label><label class="check-item"><input type="checkbox" data-rating="exam_probability" '+(state.filters.ratings.exam_probability?'checked':'')+'> 复现概率 ≥ 4 星</label><label class="check-item"><input type="checkbox" data-rating="difficulty" '+(state.filters.ratings.difficulty?'checked':'')+'> 难度 ≤ 3 星</label></div></aside><section><div class="library-top"><input id="search-input" class="search-input" aria-label="搜索题库" placeholder="如：第1周第2题、ε-N、极限定义" value="'+escapeHtml(state.filters.search)+'"><span class="result-count">显示 '+shown.length+' / '+state.data.questions.length+' 道题</span></div><div id="problem-results" class="problem-list">'+(shown.length?shown.map(problemCard).join(''):'<div class="card empty-state">没有符合筛选条件的题目。<br><br><button class="small-button" id="clear-filters">清除筛选</button></div>')+'</div></section></div></div>';
+  return '<div id="library">'+header('题库','我们已经做了这么多题了咩？？！！')+'<div class="library-layout section"><aside class="filters card"><h3>筛选题目</h3><div class="filter-group"><label class="filter-label">知识板块</label><select id="topic-filter" class="filter-select">'+topics.map(o=>'<option '+(o===state.filters.topic?'selected':'')+'>'+escapeHtml(o)+'</option>').join('')+'</select></div><div class="filter-group"><label class="filter-label">掌握程度</label><select id="mastery-filter" class="filter-select"><option>全部掌握状态</option>'+masteryOptions.map(o=>'<option '+(o===state.filters.mastery?'selected':'')+'>'+o+'</option>').join('')+'</select></div><div class="filter-group"><span class="filter-label">三维评级</span><label class="check-item"><input type="checkbox" data-rating="importance" '+(state.filters.ratings.importance?'checked':'')+'> 重要性 ≥ 4 星</label><label class="check-item"><input type="checkbox" data-rating="exam_probability" '+(state.filters.ratings.exam_probability?'checked':'')+'> 复现概率 ≥ 4 星</label><label class="check-item"><input type="checkbox" data-rating="difficulty" '+(state.filters.ratings.difficulty?'checked':'')+'> 难度 ≤ 3 星</label></div><div class="filter-group"><label class="check-item"><input type="checkbox" id="notes-only-filter" '+(state.filters.notesOnly?'checked':'')+'> 只看有笔记的题目</label></div></aside><section><div class="library-top"><input id="search-input" class="search-input" aria-label="搜索题库" placeholder="如：第1周第2题、ε-N、极限定义" value="'+escapeHtml(state.filters.search)+'"><span class="result-count">显示 '+shown.length+' / '+state.data.questions.length+' 道题</span></div><div id="problem-results" class="problem-list">'+(shown.length?shown.map(problemCard).join(''):'<div class="card empty-state">没有符合筛选条件的题目。<br><br><button class="small-button" id="clear-filters">清除筛选</button></div>')+'</div></section></div></div>';
 }
 function updateLibraryResults() {
   const list=document.getElementById('problem-results');
@@ -165,7 +199,14 @@ function updateLibraryResults() {
   list.innerHTML=shown.length?shown.map(problemCard).join(''):'<div class="card empty-state">没有符合筛选条件的题目。<br><br><button class="small-button" id="clear-filters">清除筛选</button></div>';
   if(window.MathJax?.typesetPromise) window.MathJax.typesetPromise([list]).catch(error=>console.error('数学公式排版失败',error));
   count.textContent='显示 '+shown.length+' / '+state.data.questions.length+' 道题';
-  document.getElementById('clear-filters')?.addEventListener('click',()=>{state.filters={topic:'全部知识板块',mastery:'全部掌握状态',search:'',ratings:{difficulty:false,importance:false,exam_probability:false}};render()});
+  document.getElementById('clear-filters')?.addEventListener('click',()=>{state.filters={topic:'全部知识板块',mastery:'全部掌握状态',search:'',notesOnly:false,ratings:{difficulty:false,importance:false,exam_probability:false}};render()});
+  document.getElementById('notes-only-filter').onchange=e=>{state.filters.notesOnly=e.target.checked;render()};
+}
+function detailNavigation(q) {
+  const ordered=state.data.questions.filter(matches);
+  const list=ordered.some(item=>item.id===q.id)?ordered:state.data.questions;
+  const index=list.findIndex(item=>item.id===q.id), previous=list[index-1], next=list[index+1];
+  return '<nav class="detail-navigation" aria-label="题目导航">'+(previous?'<a class="detail-nav-link" href="#problem/'+previous.id+'">← 上一题<span>第'+previous.week+'周 · 第'+previous.question_number+'题</span></a>':'<span class="detail-nav-link is-disabled">← 已是第一题</span>')+(next?'<a class="detail-nav-link next" href="#problem/'+next.id+'">下一题 →<span>第'+next.week+'周 · 第'+next.question_number+'题</span></a>':'<span class="detail-nav-link is-disabled next">已是最后一题 →</span>')+'</nav>';
 }
 function detailView(id) {
   const q=state.data.questions.find(x=>x.id===id)||state.data.questions[0];
@@ -178,13 +219,15 @@ function reviewView() {
 }
 function accountView() {
   const user=state.user;
-  if(user) return '<div>'+header('账号与同步','当前登录：'+escapeHtml(user.email||'')+'。掌握状态会同步到你的 Supabase 账号。')+'<section class="section card account-card"><p>'+escapeHtml(state.accountMessage||'云端进度同步已连接。')+'</p><button class="small-button" id="sign-out">退出登录</button></section></div>';
-  return '<div>'+header('登录与同步','登录后，你标记的掌握程度会保存到云端，并可在其他设备继续复习。')+'<section class="section card account-card"><form id="auth-form"><label for="auth-email">邮箱</label><input id="auth-email" type="email" autocomplete="email" required placeholder="name@example.com"><label for="auth-password">密码</label><input id="auth-password" type="password" autocomplete="current-password" minlength="6" required placeholder="至少 6 位"><div class="account-actions"><button class="small-button primary-button" type="submit" data-auth-action="signin">登录</button><button class="small-button" type="button" id="sign-up">创建账号</button><button class="text-button" type="button" id="reset-password">忘记密码</button></div></form><p class="account-message" id="account-message">'+escapeHtml(state.accountMessage||'')+'</p></section></div>';
+  if(user) return '<div>'+header('账号与同步','当前登录：'+escapeHtml(user.email||'')+'。')+'<section class="section card account-card"><p>'+escapeHtml(state.accountMessage||'云端进度同步已连接。')+'</p>'+themeSelect()+'<button class="small-button" id="sign-out">退出登录</button></section></div>';
+  return '<div>'+header('登录与同步','登录后，你的笔记以及标记的掌握状态会同步到你的 Supabase 账号。')+'<section class="section card account-card"><form id="auth-form"><label for="auth-email">邮箱</label><input id="auth-email" type="email" autocomplete="email" required placeholder="name@example.com"><label for="auth-password">密码</label><input id="auth-password" type="password" autocomplete="current-password" minlength="6" required placeholder="至少 6 位"><div class="account-actions"><button class="small-button primary-button" type="submit" data-auth-action="signin">登录</button><button class="small-button" type="button" id="sign-up">创建账号</button><button class="text-button" type="button" id="reset-password">忘记密码</button></div></form><p class="account-message" id="account-message">'+escapeHtml(state.accountMessage||'')+'</p>'+themeSelect()+'</section></div>';
 }
 function bindAccount() {
   const form=document.getElementById('auth-form');
   const message=document.getElementById('account-message');
   const say=text=>{state.accountMessage=text;if(message)message.textContent=text};
+  const choices=[...document.querySelectorAll('.theme-choice')];
+  if(choices.length){const current=loadTheme();choices.forEach(choice=>{choice.classList.toggle('is-selected',choice.dataset.themeChoice===current);choice.setAttribute('aria-pressed',choice.dataset.themeChoice===current?'true':'false');choice.onclick=e=>{e.preventDefault();e.stopPropagation();const value=choice.dataset.themeChoice;choices.forEach(item=>{item.classList.toggle('is-selected',item.dataset.themeChoice===value);item.setAttribute('aria-pressed',item.dataset.themeChoice===value?'true':'false')});applyTheme(value);try{localStorage.setItem(themeStorageKey(),value)}catch(_){} if(state.user&&state.supabase) state.supabase.auth.updateUser({data:{theme:value}}).catch(()=>{})}})}
   document.getElementById('sign-out')?.addEventListener('click',async()=>{const {error}=await state.supabase.auth.signOut();if(error)say(error.message);else{state.user=null;state.accountMessage='已退出登录。';render()}});
   if(!form) return;
   const email=()=>document.getElementById('auth-email').value.trim();
@@ -194,13 +237,16 @@ function bindAccount() {
   document.getElementById('reset-password').onclick=async()=>{if(!email()){say('请先填写邮箱，再点击忘记密码。');return}const {error}=await state.supabase.auth.resetPasswordForEmail(email(),{redirectTo:location.origin+location.pathname+'#account'});say(error?'发送失败：'+error.message:'如果该邮箱已注册，密码重置邮件很快会送达。')};
 }
 function bindLibrary() {
+  const layout=document.querySelector('.library-layout');
+  if(layout&&!document.getElementById('mobile-filter-toggle')){const toggle=document.createElement('button');toggle.className='mobile-filter-toggle small-button';toggle.id='mobile-filter-toggle';toggle.type='button';toggle.textContent='筛选题目';toggle.setAttribute('aria-expanded','false');layout.parentNode.insertBefore(toggle,layout);}
+  document.getElementById('mobile-filter-toggle')?.addEventListener('click',e=>{const filters=document.querySelector('.filters');const open=filters?.classList.toggle('mobile-open');e.currentTarget.setAttribute('aria-expanded',open?'true':'false');});
   document.getElementById('topic-filter').onchange=e=>{state.filters.topic=e.target.value;render()};
   document.getElementById('mastery-filter').onchange=e=>{state.filters.mastery=e.target.value;render()};
   const input=document.getElementById('search-input');
   input.oninput=e=>{state.filters.search=e.target.value;updateLibraryResults()};
   input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();state.filters.search=input.value.trim();updateLibraryResults()}};
   document.querySelectorAll('[data-rating]').forEach(el=>el.onchange=e=>{state.filters.ratings[e.target.dataset.rating]=e.target.checked;render()});
-  document.getElementById('clear-filters')?.addEventListener('click',()=>{state.filters={topic:'全部知识板块',mastery:'全部掌握状态',search:'',ratings:{difficulty:false,importance:false,exam_probability:false}};render()});
+  document.getElementById('clear-filters')?.addEventListener('click',()=>{state.filters={topic:'全部知识板块',mastery:'全部掌握状态',search:'',notesOnly:false,ratings:{difficulty:false,importance:false,exam_probability:false}};render()});
 }
 function bindDetail() {
   const select=document.getElementById('detail-mastery');
@@ -212,8 +258,10 @@ function bindDetail() {
     loadNote(id,noteInput,noteStatus);
     document.getElementById('save-question-note')?.addEventListener('click',()=>saveNote(id,noteInput.value,noteStatus));
   }
+  document.querySelector('.save-note')?.remove();
   const assistant=document.getElementById('study-assistant');
   if(assistant){
+    assistant.querySelector('.assistant-heading p')?.remove();
     assistant.classList.add('assistant-window');
     document.getElementById('assistant-orb')?.remove();
     const orb=document.createElement('button');orb.type='button';orb.className='assistant-orb';orb.id='assistant-orb';orb.setAttribute('aria-label','打开数学分析 AI 助手');orb.setAttribute('aria-expanded','false');orb.innerHTML='<span>✳</span><small>AI</small>';
@@ -320,6 +368,9 @@ function openSearch() {
 document.addEventListener('click',e=>{
   if(e.target.closest('#search-trigger')) { e.preventDefault(); openSearch(); }
   if(e.target.closest('#account-trigger')) { e.preventDefault(); location.hash='#account'; }
+  const menu=e.target.closest('#mobile-menu-toggle');
+  if(menu){const open=document.querySelector('.topnav')?.classList.toggle('mobile-open');menu.setAttribute('aria-expanded',open?'true':'false');}
+  if(e.target.closest('.topnav a')){document.querySelector('.topnav')?.classList.remove('mobile-open');document.getElementById('mobile-menu-toggle')?.setAttribute('aria-expanded','false');}
 });
 function updateNav(route) {
   const section=route.startsWith('problem/') ? 'library' : (route || 'home');
@@ -330,10 +381,27 @@ function updateNav(route) {
     else link.removeAttribute('aria-current');
   });
 }
+function updateAccountButton() {
+  const button=document.getElementById('account-trigger');
+  if(!button) return;
+  if(state.user){
+    button.className='account-button logged-in-avatar';
+    button.textContent='👤';
+    button.title=state.user.email||'账号';
+    button.setAttribute('aria-label','打开账号页面');
+  } else {
+    button.className='account-button';
+    button.textContent='登录';
+    button.title='登录';
+    button.setAttribute('aria-label','登录');
+  }
+}
 function render() {
+  applyTheme();
   if(!state.data){document.getElementById('app').innerHTML='<div class="section"><div class="card" style="padding:24px">正在加载完整题库…</div></div>';return}
   const raw=location.hash.slice(1)||'home', [route,query]=raw.split('?');
   updateNav(route);
+  updateAccountButton();
   if(route==='library' && query){
     const params=new URLSearchParams(query);
     if(params.has('search')) state.filters.search=params.get('search')||'';
@@ -342,7 +410,7 @@ function render() {
   if(route==='random'){const c=state.data.questions.filter(q=>masteryOf(q)!=='我完全掌握了');location.hash='problem/'+c[Math.floor(Math.random()*c.length)].id;return}
   const app=document.getElementById('app');
   if(window.MathJax?.typesetClear) window.MathJax.typesetClear([app]);
-  if(route.startsWith('problem/')){const questionId=route.slice(8);if(state.data.questions.some(q=>q.id===questionId)){try{localStorage.setItem(LAST_VIEWED_QUESTION_KEY,questionId)}catch(_){/* browsing history is optional */}}app.innerHTML=detailView(questionId);bindDetail()}
+  if(route.startsWith('problem/')){const questionId=route.slice(8);if(state.data.questions.some(q=>q.id===questionId)){try{localStorage.setItem(LAST_VIEWED_QUESTION_KEY,questionId)}catch(_){/* browsing history is optional */}}app.innerHTML=detailView(questionId);const currentQuestion=state.data.questions.find(q=>q.id===questionId)||state.data.questions[0];document.querySelector('#detail .back')?.insertAdjacentHTML('afterend',detailNavigation(currentQuestion));bindDetail()}
   else if(route==='library'){if(query?.includes('ratings=need'))state.filters.ratings={difficulty:false,importance:true,exam_probability:true};app.innerHTML=libraryView();bindLibrary()}
   else if(route==='review')app.innerHTML=reviewView();
   else if(route==='account'){app.innerHTML=accountView();bindAccount()}
@@ -358,6 +426,7 @@ if(window.supabase?.createClient && window.SUPABASE_CONFIG?.url && window.SUPABA
     state.user=data?.session?.user||null;
     state.progress=loadScopedProgress();
     await loadCloudProgress();
+    await loadCloudNotes();
     render();
   });
   state.supabase.auth.onAuthStateChange((_event,session)=>{
@@ -365,7 +434,7 @@ if(window.supabase?.createClient && window.SUPABASE_CONFIG?.url && window.SUPABA
     state.progress=loadScopedProgress();
     if(state.user) state.accountMessage='已登录，正在同步进度…';
     render();
-    if(state.user) setTimeout(()=>loadCloudProgress().then(()=>{state.accountMessage='云端进度同步完成。';render()}),0);
+    if(state.user) setTimeout(()=>Promise.all([loadCloudProgress(),loadCloudNotes()]).then(()=>{state.accountMessage='云端进度同步完成。';render()}),0);
   });
 } else {
   state.accountMessage='登录服务未初始化。请检查 supabase-config.js 是否配置正确，以及网络能否加载 Supabase 客户端。';
