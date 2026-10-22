@@ -50,9 +50,12 @@ function md(value) {
   s = s.replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>'+m+'</ul>');
   s = s.replace(/^\s*\d+\.\s+(.+)$/gm, '<li>$1</li>');
   const tick=String.fromCharCode(96);
-  s = s.replace(new RegExp(tick+'([^'+tick+']+)'+tick,'g'), '<code>$1</code>');
+  s = s.replace(new RegExp(tick+'([^'+tick+']+)'+tick,'g'), (_, value) => {
+    const looksLikeMath=/[\\_^{}=<>≤≥∈∀∃→↔∑∏∫√±×÷∞]/.test(value)||/^[A-Za-z](?:_[A-Za-z0-9]+)?$/.test(value);
+    return looksLikeMath?'\\('+value+'\\)':'<code>'+value+'</code>';
+  });
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  s = s.replace(/\$\$([\s\S]+?)\$\$/g, '<div class="math-box">$1</div>').replace(/\$([^$\n]+)\$/g, '<span class="math-inline">$1</span>');
+  s = s.replace(/\$\$([\s\S]+?)\$\$/g, '<div class="math-box">\\[$1\\]</div>');
   return s.split(/\n{2,}/).map(block => /^<(h[34]|ul|div)/.test(block.trim()) ? block : '<p>'+block.replace(/\n/g,'<br>')+'</p>').join('');
 }
 function stars(n) { return '<span class="stars" aria-label="'+n+'颗星">'+'★'.repeat(n)+'☆'.repeat(5-n)+'</span>'; }
@@ -178,11 +181,14 @@ function render() {
     if(params.has('mastery')) state.filters.mastery=params.get('mastery')||'全部掌握状态';
   }
   if(route==='random'){const c=state.data.questions.filter(q=>masteryOf(q)!=='我完全掌握了');location.hash='problem/'+c[Math.floor(Math.random()*c.length)].id;return}
-  if(route.startsWith('problem/')){document.getElementById('app').innerHTML=detailView(route.slice(8));bindDetail()}
-  else if(route==='library'){if(query?.includes('ratings=need'))state.filters.ratings={difficulty:false,importance:true,exam_probability:true};document.getElementById('app').innerHTML=libraryView();bindLibrary()}
-  else if(route==='review')document.getElementById('app').innerHTML=reviewView();
-  else if(route==='account'){document.getElementById('app').innerHTML=accountView();bindAccount()}
-  else document.getElementById('app').innerHTML=homeView();
+  const app=document.getElementById('app');
+  if(window.MathJax?.typesetClear) window.MathJax.typesetClear([app]);
+  if(route.startsWith('problem/')){app.innerHTML=detailView(route.slice(8));bindDetail()}
+  else if(route==='library'){if(query?.includes('ratings=need'))state.filters.ratings={difficulty:false,importance:true,exam_probability:true};app.innerHTML=libraryView();bindLibrary()}
+  else if(route==='review')app.innerHTML=reviewView();
+  else if(route==='account'){app.innerHTML=accountView();bindAccount()}
+  else app.innerHTML=homeView();
+  if(window.MathJax?.typesetPromise) window.MathJax.typesetPromise([app]).catch(error=>console.error('数学公式排版失败',error));
   window.scrollTo({top:0,behavior:'instant'});
 }
 window.addEventListener('hashchange',render);
