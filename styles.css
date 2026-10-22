@@ -350,3 +350,23 @@ body { background:#eef2f7; color:var(--ink); }
   .detail-header { margin-bottom:20px; }.detail-title { font-size:25px; }.detail-ratings { padding:14px; }.study-column { gap:9px; }.reveal summary { padding:15px 14px; }.reveal-body { padding:15px 16px 18px; font-size:13px; }
   .detail-navigation { position:fixed; z-index:20; left:0; right:0; bottom:0; margin:0; padding:8px 12px max(8px,env(safe-area-inset-bottom)); background:color-mix(in srgb,var(--surface) 94%,transparent); border-top:1px solid var(--line); box-shadow:0 -8px 25px var(--shadow-color); backdrop-filter:blur(10px); }
 }
+.assistant-orb { touch-action:none; cursor:grab; }
+.assistant-orb:active { cursor:grabbing; }
+
+/* The assistant is a separate frosted-glass work surface. */
+[data-theme] .assistant-window {
+  background:color-mix(in srgb,var(--surface) 76%,transparent);
+  border:1px solid color-mix(in srgb,var(--line) 72%,white);
+  box-shadow:0 24px 80px color-mix(in srgb,var(--shadow-color) 82%,transparent), inset 0 1px 0 rgba(255,255,255,.55);
+  backdrop-filter:blur(18px) saturate(1.15);
+  -webkit-backdrop-filter:blur(18px) saturate(1.15);
+}
+[data-theme] .assistant-window .assistant-heading { padding-bottom:13px; border-bottom:1px solid color-mix(in srgb,var(--line) 72%,transparent); }
+[data-theme] .assistant-window .assistant-chat { padding:3px; }
+[data-theme] .assistant-window .assistant-key-settings { background:color-mix(in srgb,var(--surface-soft) 70%,transparent); }
+
+@media (max-width:520px) {
+  .assistant-focus-row { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .assistant-focus-row textarea { grid-column:1 / -1; width:100%; }
+  .assistant-focus-row button { width:100%; align-self:stretch; }
+}

@@ -268,8 +268,14 @@ function bindDetail() {
     const close=document.createElement('button');close.type='button';close.className='assistant-close';close.setAttribute('aria-label','关闭助手窗口');close.textContent='×';
     assistant.querySelector('.assistant-heading')?.append(close);
     document.body.append(orb);
+    const orbPositionKey='math-analysis-assistant-orb-position';
+    try{const saved=JSON.parse(localStorage.getItem(orbPositionKey)||'null');if(saved&&Number.isFinite(saved.left)&&Number.isFinite(saved.top)){orb.style.left=saved.left+'px';orb.style.top=saved.top+'px';orb.style.right='auto';orb.style.bottom='auto';}}catch(_){/* position is optional */}
     const setOpen=open=>{assistant.classList.toggle('is-open',open);orb.setAttribute('aria-expanded',String(open));if(open)document.getElementById('assistant-question')?.focus()};
-    orb.addEventListener('click',()=>setOpen(!assistant.classList.contains('is-open')));
+    let dragging=false, moved=false, startX=0, startY=0, startLeft=0, startTop=0;
+    orb.addEventListener('pointerdown',event=>{dragging=true;moved=false;startX=event.clientX;startY=event.clientY;const rect=orb.getBoundingClientRect();startLeft=rect.left;startTop=rect.top;orb.setPointerCapture?.(event.pointerId);});
+    orb.addEventListener('pointermove',event=>{if(!dragging)return;const dx=event.clientX-startX,dy=event.clientY-startY;if(Math.abs(dx)+Math.abs(dy)>4)moved=true;if(!moved)return;const left=Math.max(8,Math.min(window.innerWidth-orb.offsetWidth-8,startLeft+dx));const top=Math.max(8,Math.min(window.innerHeight-orb.offsetHeight-8,startTop+dy));orb.style.left=left+'px';orb.style.top=top+'px';orb.style.right='auto';orb.style.bottom='auto';});
+    orb.addEventListener('pointerup',()=>{if(!dragging)return;dragging=false;if(moved){try{const rect=orb.getBoundingClientRect();localStorage.setItem(orbPositionKey,JSON.stringify({left:Math.round(rect.left),top:Math.round(rect.top)}))}catch(_){}setTimeout(()=>{moved=false},0);}});
+    orb.addEventListener('click',()=>{if(!moved)setOpen(!assistant.classList.contains('is-open'))});
     close.addEventListener('click',()=>setOpen(false));
     document.addEventListener('keydown',event=>{if(event.key==='Escape'&&assistant.classList.contains('is-open'))setOpen(false)});
   }
@@ -400,6 +406,7 @@ function render() {
   applyTheme();
   if(!state.data){document.getElementById('app').innerHTML='<div class="section"><div class="card" style="padding:24px">正在加载完整题库…</div></div>';return}
   const raw=location.hash.slice(1)||'home', [route,query]=raw.split('?');
+  if(!route.startsWith('problem/')) document.getElementById('assistant-orb')?.remove();
   updateNav(route);
   updateAccountButton();
   if(route==='library' && query){
