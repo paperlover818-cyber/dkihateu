@@ -8,6 +8,9 @@ const state = {
 };
 const masteryOptions = ['尚未评估', '我没有完全看懂', '我看懂了但无法复述', '我可以复述', '我完全掌握了'];
 const revealLabels = [['problem', '题目'], ['hint', '大致思路'], ['framework', '思维推进框架'], ['solution', '完整答案'], ['reflection', '反思收获']];
+const LAST_VIEWED_QUESTION_KEY = 'math-analysis-last-viewed-question';
+const DEEPSEEK_KEY_STORAGE = 'math-analysis-deepseek-key-session';
+let assistantFocusText = '';
 
 function loadProgress() {
   try { return JSON.parse(localStorage.getItem('math-analysis-progress') || '{}'); }
@@ -45,8 +48,23 @@ function escapeHtml(value) {
 }
 function stackSlashFractions(value) {
   const indexed='[A-Za-z0-9]+(?:_\\{[^{}]+\\}|_[A-Za-z0-9]+)?(?:\\^\\{[^{}]+\\}|\\^[A-Za-z0-9]+)?';
-  const atom='(?:\\([^()]*\\)|\\\\[A-Za-z]+(?:\\s+[A-Za-z]+)?|'+indexed+')';
-  return value.replace(new RegExp('('+atom+')\\s*/\\s*('+atom+')','g'),'\\dfrac{$1}{$2}');
+  const command='(?:\\\\sqrt(?:\\{[^{}]*\\}|[A-Za-z0-9])|\\\\(?:[A-Za-z]+(?:\\{[^{}]*\\}|\\s+\\{[^{}]*\\})?|\\\\))';
+  const atom='(?:\\([^()]*\\)|'+command+'|'+indexed+')';
+  // Do not begin matching in the middle of a TeX command (e.g. turn `\pm3/2`
+  // into `\dfrac{pm3}{2}`). The numeric part may still be stacked normally.
+  return value.replace(new RegExp('(?<![A-Za-z\\\\])('+atom+')\\s*/\\s*('+atom+')','g'),'\\dfrac{$1}{$2}');
+}
+function normalizeMathOperators(value) {
+  // Backtick formulas are authored in lightweight notation (e.g. `ln n`,
+  // `lim_{n→∞}`). Typeset standard function names as operators, not variables.
+  return value
+    .replace(/\\sqrt(?!\s*\{)([A-Za-z0-9])/g, (_, radicand) => `\\sqrt{${radicand}}`)
+    .replace(/√([A-Za-z0-9])/g, (_, radicand) => `\\sqrt{${radicand}}`)
+    .replace(/\\(pm|mp)([0-9]+)\/([0-9]+)/g, (_, sign, numerator, denominator) => `\\${sign}\\dfrac{${numerator}}{${denominator}}`)
+    .replace(/\b(ln|log|sin|cos|tan|exp|arcsin|arccos|arctan)\s+([A-Za-z](?:_[A-Za-z0-9]+)?)/g,
+      (_, operator, argument) => `\\${operator}{${argument}}`)
+    .replace(/(?<!\\)\b(arcsin|arccos|arctan|limsup|liminf|ln|log|lim|sin|cos|tan|exp)\b/g,
+      (_, operator) => `\\${operator}`);
 }
 function md(value) {
   let s = escapeHtml(value);
@@ -57,13 +75,13 @@ function md(value) {
   const tick=String.fromCharCode(96);
   s = s.replace(new RegExp(tick+'([^'+tick+']+)'+tick,'g'), (_, value) => {
     const looksLikeMath=/[\\_^{}=<>≤≥∈∀∃→↔∑∏∫√±×÷∞]/.test(value)||/^[A-Za-z](?:_[A-Za-z0-9]+)?$/.test(value);
-    const formula=stackSlashFractions(value);
+    const formula=stackSlashFractions(normalizeMathOperators(value));
     const isMath=looksLikeMath||formula!==value;
     return isMath?'\\('+formula+'\\)':'<code>'+value+'</code>';
   });
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  s = s.replace(/\$\$([\s\S]+?)\$\$/g, '<div class="math-box">\\[$1\\]</div>');
-  s = s.replace(/\$([^$\n]+)\$/g, (_, value) => '\\('+stackSlashFractions(value)+'\\)');
+  s = s.replace(/\$\$([\s\S]+?)\$\$/g, (_, value) => '<div class="math-box">\\['+stackSlashFractions(normalizeMathOperators(value))+'\\]</div>');
+  s = s.replace(/\$([^$\n]+)\$/g, (_, value) => '\\('+stackSlashFractions(normalizeMathOperators(value))+'\\)');
   return s.split(/\n{2,}/).map(block => /^<(h[34]|ul|div)/.test(block.trim()) ? block : '<p>'+block.replace(/\n/g,'<br>')+'</p>').join('');
 }
 function stars(n) { return '<span class="stars" aria-label="'+n+'颗星">'+'★'.repeat(n)+'☆'.repeat(5-n)+'</span>'; }
@@ -105,14 +123,14 @@ function matches(q) {
 function problemCard(q) {
   return '<article class="problem-card card"><a class="problem-link" href="#problem/'+q.id+'"><div class="problem-title">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.title)+'</div><div class="problem-summary">'+questionSummary(q)+'</div><div class="problem-meta"><span class="week-tag">第'+q.week+'周</span>'+q.knowledge.slice(0,2).map(k=>'<span class="tag">'+escapeHtml(k.split('/').at(-1))+'</span>').join('')+'<span class="mastery-tag">'+escapeHtml(masteryOf(q))+'</span></div></a><div class="rating-stack"><div>难度 '+stars(q.ratings.difficulty)+'</div><div>重要性 '+stars(q.ratings.importance)+'</div><div>复现 '+stars(q.ratings.exam_probability)+'</div></div></article>';
 }
-function header(title, subtitle) { return '<div class="eyebrow">数学分析 · 个人题库</div><h1>'+title+'</h1><p class="hero-copy p">'+subtitle+'</p>'; }
+function header(title, subtitle) { return '<div class="eyebrow">数学分析·题库 by paperlover</div><h1>'+title+'</h1><p class="hero-copy p">'+subtitle+'</p>'; }
 function homeView() {
-  const qs=state.data.questions, featured=qs.find(q=>q.id==='w02-q11')||qs[0], mastered=qs.filter(q=>masteryOf(q)==='我完全掌握了').length, assessed=qs.filter(q=>masteryOf(q)!=='尚未评估').length, progress=Math.round(mastered/qs.length*100);
-  return '<div id="home"><section class="hero"><div class="hero-copy">'+header('把每一道题，变成自己的工具。','完整题库已接入：按知识、掌握程度和三维星级复习。')+'</div><div class="progress-card"><div class="progress-top"><span>题库进度</span><span>'+assessed+'/'+qs.length+' 已标记</span></div><div class="progress-number">'+progress+'% 完全掌握</div><div class="progress-track"><div class="progress-fill" style="width:'+progress+'%"></div></div></div></section><section class="section"><div class="section-head"><div><h2>继续学习</h2><p>从一道完整题目开始</p></div><a class="small-button" href="#library">查看全部题目 →</a></div><div class="continue-grid"><a class="continue-card featured card" href="#problem/'+featured.id+'"><div><div class="card-meta"><span>第'+featured.week+'周 · 第'+featured.question_number+'题</span><span>推荐</span></div><div class="card-title">'+escapeHtml(featured.title)+'</div><div class="card-description">'+questionSummary(featured)+'</div></div><div class="card-bottom"><span class="status-pill">'+escapeHtml(masteryOf(featured))+'</span><span class="mini-arrow">↗</span></div></a></div></section><section class="section"><div class="section-head"><div><h2>从这里开始</h2><p>四种进入方式</p></div></div><div class="tool-grid"><a class="tool-card card" href="#random"><div class="tool-icon">⌁</div><h3>从这里开始</h3><p>从前三级掌握状态中随机抽一道题。</p></a><a class="tool-card card" href="#library"><div class="tool-icon">⌘</div><h3>按知识找题</h3><p>按三级知识路径查找完整题目。</p></a><a class="tool-card card" href="#library?ratings=need"><div class="tool-icon">↻</div><h3>按需要练习</h3><p>按掌握程度与三维星级筛选。</p></a><a class="tool-card card" href="#review"><div class="tool-icon">✦</div><h3>我的复习</h3><p>集中查看前两级掌握状态的题目。</p></a></div></section><section class="section"><div class="card" style="padding:20px"><div class="library-top"><span class="week-tag">已接入</span><span class="muted" style="font-size:13px">'+qs.length+' 道题 · '+state.data.knowledge_index.length+' 条三级知识路径</span></div></div></section></div>';
+  const qs=state.data.questions, lastId=(()=>{try{return localStorage.getItem(LAST_VIEWED_QUESTION_KEY)}catch(_){return null}})(), featured=qs.find(q=>q.id===lastId)||qs.find(q=>q.id==='w02-q11')||qs[0], hasLastViewed=featured.id===lastId, mastered=qs.filter(q=>masteryOf(q)==='我完全掌握了').length, assessed=qs.filter(q=>masteryOf(q)!=='尚未评估').length, progress=Math.round(mastered/qs.length*100);
+  return '<div id="home"><section class="hero"><div class="hero-copy">'+header('今天你杜分析了吗','学完杜分析可以拿八百万年薪量化大结果吗qwq')+'</div><div class="progress-card"><div class="progress-top"><span>题库进度</span><span>'+assessed+'/'+qs.length+' 已标记</span></div><div class="progress-number">'+progress+'% 完全掌握</div><div class="progress-track"><div class="progress-fill" style="width:'+progress+'%"></div></div></div></section><section class="section"><div class="section-head"><div><h2>继续学习</h2><p>'+(hasLastViewed?'接着上次浏览的题目继续学习':'还记得这道题吗？')+'</p></div><a class="small-button" href="#library">查看全部题目 →</a></div><div class="continue-grid"><a class="continue-card featured card" href="#problem/'+featured.id+'"><div><div class="card-meta"><span>第'+featured.week+'周 · 第'+featured.question_number+'题</span><span>'+(hasLastViewed?'上次浏览':'推荐')+'</span></div><div class="card-title">'+escapeHtml(featured.title)+'</div><div class="card-description">'+questionSummary(featured)+'</div></div><div class="card-bottom"><span class="status-pill">'+escapeHtml(masteryOf(featured))+'</span><span class="mini-arrow">↗</span></div></a></div></section><section class="section"><div class="section-head"><div><h2>从这里开始</h2><p>四种进入方式</p></div></div><div class="tool-grid"><a class="tool-card card" href="#random"><div class="tool-icon">⌁</div><h3>just do it！</h3><p>从前三级掌握状态中随机抽一道题。</p></a><a class="tool-card card" href="#library"><div class="tool-icon">⌘</div><h3>按知识找题</h3><p>按三级知识路径查找完整题目。</p></a><a class="tool-card card" href="#library?ratings=need"><div class="tool-icon">↻</div><h3>按需要练习</h3><p>按掌握程度与三维星级筛选。</p></a><a class="tool-card card" href="#review"><div class="tool-icon">✦</div><h3>我的复习</h3><p>集中查看前两级掌握状态的题目。</p></a></div></section><section class="section"><div class="card" style="padding:20px"><div class="library-top"><span class="week-tag">已接入</span><span class="muted" style="font-size:13px">'+qs.length+' 道题 · '+state.data.knowledge_index.length+' 条三级知识路径</span></div></div></section></div>';
 }
 function libraryView() {
   const shown=state.data.questions.filter(matches), topics=topicRoots();
-  return '<div id="library">'+header('题库','每一道题都来自内容库，详情页按题目、思路、框架、答案、反思逐层展开。')+'<div class="library-layout section"><aside class="filters card"><h3>筛选题目</h3><div class="filter-group"><label class="filter-label">知识板块</label><select id="topic-filter" class="filter-select">'+topics.map(o=>'<option '+(o===state.filters.topic?'selected':'')+'>'+escapeHtml(o)+'</option>').join('')+'</select></div><div class="filter-group"><label class="filter-label">掌握程度</label><select id="mastery-filter" class="filter-select"><option>全部掌握状态</option>'+masteryOptions.map(o=>'<option '+(o===state.filters.mastery?'selected':'')+'>'+o+'</option>').join('')+'</select></div><div class="filter-group"><span class="filter-label">三维评级</span><label class="check-item"><input type="checkbox" data-rating="importance" '+(state.filters.ratings.importance?'checked':'')+'> 重要性 ≥ 4 星</label><label class="check-item"><input type="checkbox" data-rating="exam_probability" '+(state.filters.ratings.exam_probability?'checked':'')+'> 复现概率 ≥ 4 星</label><label class="check-item"><input type="checkbox" data-rating="difficulty" '+(state.filters.ratings.difficulty?'checked':'')+'> 难度 ≤ 3 星</label></div></aside><section><div class="library-top"><input id="search-input" class="search-input" aria-label="搜索题库" placeholder="如：第1周第2题、ε-N、极限定义" value="'+escapeHtml(state.filters.search)+'"><span class="result-count">显示 '+shown.length+' / '+state.data.questions.length+' 道题</span></div><div id="problem-results" class="problem-list">'+(shown.length?shown.map(problemCard).join(''):'<div class="card empty-state">没有符合筛选条件的题目。<br><br><button class="small-button" id="clear-filters">清除筛选</button></div>')+'</div></section></div></div>';
+  return '<div id="library">'+header('题库','我们已经做了这么多题了咩？？！！')+'<div class="library-layout section"><aside class="filters card"><h3>筛选题目</h3><div class="filter-group"><label class="filter-label">知识板块</label><select id="topic-filter" class="filter-select">'+topics.map(o=>'<option '+(o===state.filters.topic?'selected':'')+'>'+escapeHtml(o)+'</option>').join('')+'</select></div><div class="filter-group"><label class="filter-label">掌握程度</label><select id="mastery-filter" class="filter-select"><option>全部掌握状态</option>'+masteryOptions.map(o=>'<option '+(o===state.filters.mastery?'selected':'')+'>'+o+'</option>').join('')+'</select></div><div class="filter-group"><span class="filter-label">三维评级</span><label class="check-item"><input type="checkbox" data-rating="importance" '+(state.filters.ratings.importance?'checked':'')+'> 重要性 ≥ 4 星</label><label class="check-item"><input type="checkbox" data-rating="exam_probability" '+(state.filters.ratings.exam_probability?'checked':'')+'> 复现概率 ≥ 4 星</label><label class="check-item"><input type="checkbox" data-rating="difficulty" '+(state.filters.ratings.difficulty?'checked':'')+'> 难度 ≤ 3 星</label></div></aside><section><div class="library-top"><input id="search-input" class="search-input" aria-label="搜索题库" placeholder="如：第1周第2题、ε-N、极限定义" value="'+escapeHtml(state.filters.search)+'"><span class="result-count">显示 '+shown.length+' / '+state.data.questions.length+' 道题</span></div><div id="problem-results" class="problem-list">'+(shown.length?shown.map(problemCard).join(''):'<div class="card empty-state">没有符合筛选条件的题目。<br><br><button class="small-button" id="clear-filters">清除筛选</button></div>')+'</div></section></div></div>';
 }
 function updateLibraryResults() {
   const list=document.getElementById('problem-results');
@@ -127,7 +145,7 @@ function updateLibraryResults() {
 function detailView(id) {
   const q=state.data.questions.find(x=>x.id===id)||state.data.questions[0];
   const body=revealLabels.map(([key,label],i)=>'<details class="reveal" '+(i===0?'open':'')+'><summary><span class="reveal-index">0'+(i+1)+'</span>'+label+'</summary><div class="reveal-body markdown">'+md(q.sections[key])+'</div></details>').join('');
-  return '<div id="detail"><a class="back" href="#library">← 返回题库</a><div class="detail-header"><div class="detail-main"><div class="eyebrow">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.knowledge[0].split('/')[0])+'</div><h1 class="detail-title">'+escapeHtml(q.title)+'</h1><div class="detail-subtitle">'+questionSummary(q)+'</div><div class="detail-tags">'+q.tags.map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('')+'</div></div><aside class="detail-ratings card">'+ratingRows(q)+'</aside></div><div class="study-layout"><section class="study-column">'+body+'</section><aside><div class="side-card card"><h3>我的状态</h3><select class="mastery-select" id="detail-mastery">'+masteryOptions.map(o=>'<option '+(o===masteryOf(q)?'selected':'')+'>'+o+'</option>').join('')+'</select><div class="save-note">状态已按题目保存到本机浏览器。</div></div><div class="side-card card"><h3>知识点位置</h3>'+q.knowledge.map(k=>'<div class="side-row"><span>'+escapeHtml(k)+'</span></div>').join('')+'</div><div class="side-card card"><h3>来源与核对</h3><div class="side-row"><span>资料</span><b>'+escapeHtml(q.sources.join('；'))+'</b></div><div class="side-row"><span>页码</span><b>'+escapeHtml(q.source_pages)+'</b></div></div></aside></div></div>';
+  return '<div id="detail"><a class="back" href="#library">← 返回题库</a><div class="detail-header"><div class="detail-main"><div class="eyebrow">第'+q.week+'周 · 第'+q.question_number+'题 · '+escapeHtml(q.knowledge[0].split('/')[0])+'</div><h1 class="detail-title">'+escapeHtml(q.title)+'</h1><div class="detail-subtitle">'+questionSummary(q)+'</div><div class="detail-tags">'+q.tags.map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('')+'</div></div><aside class="detail-ratings card">'+ratingRows(q)+'</aside></div><div class="study-layout"><section class="study-column">'+body+'<section class="assistant-card card" id="study-assistant"><div class="assistant-heading"><div><span class="eyebrow">DEEPSEEK · BYOK</span><h2>这一步卡住了吗？</h2><p>助手会读取本题全部内容，包括尚未展开的部分。</p></div><span class="assistant-mark">✳</span></div><details class="assistant-key-settings"><summary>设置 DeepSeek API Key</summary><div class="assistant-key-row"><input id="deepseek-key" type="password" autocomplete="off" placeholder="粘贴你的 DeepSeek API Key"><button class="small-button" id="save-deepseek-key" type="button">本次会话使用</button><button class="text-button" id="clear-deepseek-key" type="button">清除</button></div><p class="assistant-privacy">密钥只保存在当前标签页会话中，关闭标签页后清除；不会写入题库或网站代码。提问时题目内容和问题会发送给 DeepSeek API。</p><div class="assistant-key-status" id="deepseek-key-status"></div></details><div class="assistant-focus"><label for="assistant-focus-text">聚焦内容（可选）</label><div class="assistant-focus-row"><textarea id="assistant-focus-text" rows="2" placeholder="选中答案里想问的文字，再点“引用选中文字”；也可以直接粘贴公式或句子。"></textarea><button class="small-button" id="capture-assistant-focus" type="button">引用选中文字</button></div></div><div class="assistant-chat" id="assistant-chat" aria-live="polite"><div class="assistant-empty">例如：“为什么这里可以用 Stolz 定理？”或“请把这一步展开说明。”</div></div><form class="assistant-compose" id="assistant-form"><textarea id="assistant-question" rows="2" required placeholder="告诉我你卡在哪一步…"></textarea><button class="small-button primary-button" type="submit">提问 ↗</button></form><div class="assistant-notice" id="assistant-notice" role="status"></div></section></section><aside><div class="side-card card"><h3>我的状态</h3><select class="mastery-select" id="detail-mastery">'+masteryOptions.map(o=>'<option '+(o===masteryOf(q)?'selected':'')+'>'+o+'</option>').join('')+'</select><div class="save-note">状态已按题目保存到本机浏览器。</div></div><div class="side-card card"><h3>知识点位置</h3>'+q.knowledge.map(k=>'<div class="side-row"><span>'+escapeHtml(k)+'</span></div>').join('')+'</div><div class="side-card card"><h3>来源与核对</h3><div class="side-row"><span>资料</span><b>'+escapeHtml(q.sources.join('；'))+'</b></div><div class="side-row"><span>页码</span><b>'+escapeHtml(q.source_pages)+'</b></div></aside></div></div>';
 }
 function reviewView() {
   const qs=state.data.questions.filter(q=>masteryOf(q)==='我没有完全看懂'||masteryOf(q)==='我看懂了但无法复述');
@@ -161,9 +179,65 @@ function bindLibrary() {
 }
 function bindDetail() {
   const select=document.getElementById('detail-mastery');
-  if(!select) return;
   const id=location.hash.slice(1).split('?')[0].slice(8);
-  select.onchange=e=>{ saveMastery(id,e.target.value); };
+  if(select) select.onchange=e=>{ saveMastery(id,e.target.value); };
+  const keyInput=document.getElementById('deepseek-key');
+  const keyStatus=document.getElementById('deepseek-key-status');
+  const savedKey=()=>{try{return sessionStorage.getItem(DEEPSEEK_KEY_STORAGE)||''}catch(_){return ''}};
+  if(keyInput && savedKey()) keyInput.value=savedKey();
+  const setKeyStatus=message=>{if(keyStatus)keyStatus.textContent=message};
+  document.getElementById('save-deepseek-key')?.addEventListener('click',()=>{
+    const key=keyInput?.value.trim();
+    if(!key){setKeyStatus('请先粘贴 DeepSeek API Key。');return}
+    try{sessionStorage.setItem(DEEPSEEK_KEY_STORAGE,key);setKeyStatus('已保存到当前标签页会话。')}
+    catch(_){setKeyStatus('浏览器阻止了会话存储，请检查隐私设置后重试。')}
+  });
+  document.getElementById('clear-deepseek-key')?.addEventListener('click',()=>{
+    try{sessionStorage.removeItem(DEEPSEEK_KEY_STORAGE)}catch(_){}
+    if(keyInput)keyInput.value='';setKeyStatus('已清除当前标签页中的密钥。');
+  });
+  document.getElementById('capture-assistant-focus')?.addEventListener('click',()=>{
+    const selected=window.getSelection()?.toString().trim();
+    const focus=document.getElementById('assistant-focus-text');
+    if(selected){focus.value=selected;assistantFocusText=selected;document.getElementById('assistant-notice').textContent='已引用选中文字。'}
+    else document.getElementById('assistant-notice').textContent='请先在题目或答案中选中一段文字，再点击此按钮。';
+  });
+  const form=document.getElementById('assistant-form');
+  const chat=document.getElementById('assistant-chat');
+  const notice=document.getElementById('assistant-notice');
+  const focusInput=document.getElementById('assistant-focus-text');
+  focusInput?.addEventListener('input',()=>{assistantFocusText=focusInput.value});
+  form?.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const key=savedKey()||keyInput?.value.trim();
+    const question=document.getElementById('assistant-question').value.trim();
+    if(!key){setKeyStatus('请先设置 API Key，再提问。');document.querySelector('.assistant-key-settings')?.setAttribute('open','');return}
+    if(!question)return;
+    const q=state.data.questions.find(item=>item.id===id);
+    if(!q){notice.textContent='找不到当前题目，请返回题库后重试。';return}
+    const sections=revealLabels.map(([field,label])=>'【'+label+'】\n'+(q.sections?.[field]||'（该部分暂无内容）')).join('\n\n');
+    const context='题目：'+q.title+'\n位置：第'+q.week+'周第'+q.question_number+'题\n知识点：'+(q.knowledge||[]).join('；')+'\n\n'+sections;
+    const focus=focusInput?.value.trim()||assistantFocusText;
+    const send=document.querySelector('#assistant-form button[type="submit"]');
+    const append=(role,text)=>{const item=document.createElement('div');item.className='assistant-message '+role;item.textContent=text;chat.append(item);chat.scrollTop=chat.scrollHeight;return item};
+    chat.querySelector('.assistant-empty')?.remove();
+    append('user',question+(focus?'\n聚焦内容：'+focus:''));
+    const pending=append('assistant','正在向 DeepSeek 提问…');
+    send.disabled=true;notice.textContent='';
+    try{
+      const response=await fetch('https://api.deepseek.com/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify({model:'deepseek-chat',temperature:0.3,messages:[
+        {role:'system',content:'你是复旦大学数学分析课程的耐心助教。请用中文帮助学生理解解答中难懂的部分。先指出核心逻辑，再逐步解释关键定义、定理条件和推导；必要时给一个小例子。围绕用户的问题和聚焦内容回答，不要无端重写整题；如果题解可能有误，明确指出并解释。数学公式用 LaTeX。'},
+        {role:'user',content:'下面是当前题目的完整资料（包括尚未在页面展开的部分），请作为回答上下文：\n\n'+context+'\n\n'+(focus?'用户特别聚焦的原文：\n'+focus+'\n\n':'')+'用户的问题：\n'+question}
+      ]})});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.error?.message||('HTTP '+response.status));
+      const answer=data.choices?.[0]?.message?.content;
+      if(!answer)throw new Error('接口没有返回回答内容。');
+      pending.textContent=answer;
+    }catch(error){
+      pending.textContent='请求失败：'+error.message+'。如果是浏览器网络/CORS 错误，当前静态网页可能无法直接连接 API；可检查密钥和网络，或后续改用仅供个人部署的代理服务。';
+    }finally{send.disabled=false;document.getElementById('assistant-question').value='';}
+  });
 }
 function openSearch() {
   if(!location.hash.startsWith('#library')) location.hash='#library';
@@ -196,7 +270,7 @@ function render() {
   if(route==='random'){const c=state.data.questions.filter(q=>masteryOf(q)!=='我完全掌握了');location.hash='problem/'+c[Math.floor(Math.random()*c.length)].id;return}
   const app=document.getElementById('app');
   if(window.MathJax?.typesetClear) window.MathJax.typesetClear([app]);
-  if(route.startsWith('problem/')){app.innerHTML=detailView(route.slice(8));bindDetail()}
+  if(route.startsWith('problem/')){const questionId=route.slice(8);if(state.data.questions.some(q=>q.id===questionId)){try{localStorage.setItem(LAST_VIEWED_QUESTION_KEY,questionId)}catch(_){/* browsing history is optional */}}app.innerHTML=detailView(questionId);bindDetail()}
   else if(route==='library'){if(query?.includes('ratings=need'))state.filters.ratings={difficulty:false,importance:true,exam_probability:true};app.innerHTML=libraryView();bindLibrary()}
   else if(route==='review')app.innerHTML=reviewView();
   else if(route==='account'){app.innerHTML=accountView();bindAccount()}
