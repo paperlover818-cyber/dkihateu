@@ -356,7 +356,8 @@ body { background:#eef2f7; color:var(--ink); }
 /* The assistant is a separate frosted-glass work surface. */
 [data-theme] .assistant-window {
   background:color-mix(in srgb,var(--surface) 76%,transparent);
-  border:1px solid color-mix(in srgb,var(--line) 72%,white);
+  border:2px solid color-mix(in srgb,var(--accent-strong) 48%,var(--line));
+  outline:1px solid color-mix(in srgb,var(--accent-soft) 72%,transparent);
   box-shadow:0 24px 80px color-mix(in srgb,var(--shadow-color) 82%,transparent), inset 0 1px 0 rgba(255,255,255,.55);
   backdrop-filter:blur(18px) saturate(1.15);
   -webkit-backdrop-filter:blur(18px) saturate(1.15);
@@ -369,4 +370,7 @@ body { background:#eef2f7; color:var(--ink); }
   .assistant-focus-row { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
   .assistant-focus-row textarea { grid-column:1 / -1; width:100%; }
   .assistant-focus-row button { width:100%; align-self:stretch; }
+  .assistant-compose { display:flex; width:100%; }
+  .assistant-compose textarea { width:100%; flex:0 0 auto; }
+  .assistant-compose button { width:100%; align-self:stretch; }
 }
