@@ -370,7 +370,45 @@ body { background:#eef2f7; color:var(--ink); }
   .assistant-focus-row { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
   .assistant-focus-row textarea { grid-column:1 / -1; width:100%; }
   .assistant-focus-row button { width:100%; align-self:stretch; }
-  .assistant-compose { display:flex; width:100%; }
+  /* Keep the question box immediately below focus controls; chat history follows it. */
+  .assistant-compose { display:flex; width:100%; order:4; margin-top:8px; }
   .assistant-compose textarea { width:100%; flex:0 0 auto; }
   .assistant-compose button { width:100%; align-self:stretch; }
+  .assistant-chat { order:5; min-height:0; flex:0 1 auto; margin-top:8px; }
+  .assistant-notice { order:6; }
+  .assistant-window.is-open { height:auto; max-height:78dvh; }
+}
+
+/* Tablet / iPad layouts: preserve a roomy study canvas and a floating assistant. */
+@media (min-width:521px) and (max-width:1100px) {
+  .topbar { padding-left:24px; padding-right:24px; gap:18px; }
+  .topnav { gap:clamp(10px, 1.8vw, 20px); }
+  .main-content { padding:42px 26px 72px; }
+  .hero { gap:22px; }
+  .continue-grid,.tool-grid { gap:12px; }
+  .problem-card { padding:16px; gap:12px; }
+  .detail-header { gap:18px; }
+  .detail-ratings { min-width:200px; }
+  .reveal summary { padding:17px 18px; }
+  .reveal-body { padding:18px 20px 22px; }
+  .assistant-window { right:22px; bottom:88px; width:min(460px,calc(100vw - 44px)); max-height:min(760px,78dvh); }
+  .assistant-chat { max-height:min(34dvh,360px); }
+  .assistant-focus-row { gap:8px; }
+  .assistant-focus-row textarea,.assistant-compose textarea { font-size:14px; }
+  .assistant-orb { right:24px; bottom:22px; width:60px; height:60px; }
+}
+@media (min-width:851px) and (max-width:1100px) {
+  .study-layout { grid-template-columns:minmax(0,1fr) 245px; gap:17px; }
+}
+@media (min-width:521px) and (max-width:850px) {
+  .main-content { padding:34px 24px 64px; }
+  .topbar { padding-left:20px; padding-right:20px; gap:14px; }
+  .topnav { gap:12px; }
+  .tool-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .continue-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .assistant-window { right:18px; bottom:86px; width:min(440px,calc(100vw - 36px)); }
+}
+@media (hover:none) and (pointer:coarse) and (min-width:521px) {
+  .topnav a,.small-button,.text-button,.assistant-close { min-height:42px; }
+  .assistant-orb { touch-action:none; }
 }

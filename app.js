@@ -31,7 +31,7 @@ function applyTheme(theme = loadTheme()) {
   const valid=THEME_OPTIONS.some(([key])=>key===theme) ? theme : 'blue';
   document.documentElement.dataset.theme=valid;
 }
-function themeSelect() { return '<div class="theme-setting"><span>页面配色</span><nav class="theme-nav" aria-label="页面配色分类">'+THEME_GROUPS.map(([group, options],i)=>'<details class="theme-group" '+(i===0?'open':'')+'><summary>'+group+'</summary><div class="theme-nav-panel">'+options.map(([key,label])=>'<button type="button" class="theme-choice" data-theme-choice="'+key+'">'+label+'</button>').join('')+'</div></details>').join('')+'</nav></div>'; }
+function themeSelect() { return '<div class="theme-setting"><span>页面配色</span><nav class="theme-nav" aria-label="页面配色分类">'+THEME_GROUPS.map(([group, options])=>'<details class="theme-group"><summary>'+group+'</summary><div class="theme-nav-panel">'+options.map(([key,label])=>'<button type="button" class="theme-choice" data-theme-choice="'+key+'">'+label+'</button>').join('')+'</div></details>').join('')+'</nav></div>'; }
 
 function loadProgress() {
   try { return JSON.parse(localStorage.getItem('math-analysis-progress') || '{}'); }
@@ -185,7 +185,7 @@ function problemCard(q) {
 function header(title, subtitle) { return '<div class="eyebrow">数学分析·题库 by paperlover</div><h1>'+title+'</h1><p class="hero-copy p">'+subtitle+'</p>'; }
 function homeView() {
   const qs=state.data.questions, lastId=(()=>{try{return localStorage.getItem(LAST_VIEWED_QUESTION_KEY)}catch(_){return null}})(), featured=qs.find(q=>q.id===lastId)||qs.find(q=>q.id==='w02-q11')||qs[0], hasLastViewed=featured.id===lastId, mastered=qs.filter(q=>masteryOf(q)==='我完全掌握了').length, assessed=qs.filter(q=>masteryOf(q)!=='尚未评估').length, progress=Math.round(mastered/qs.length*100);
-  return '<div id="home"><section class="hero"><div class="hero-copy">'+header('今天你杜分析了吗','学完杜分析可以拿八百万年薪量化大结果吗qwq')+'</div><div class="progress-card"><div class="progress-top"><span>题库进度</span><span>'+assessed+'/'+qs.length+' 已标记</span></div><div class="progress-number">'+progress+'% 完全掌握</div><div class="progress-track"><div class="progress-fill" style="width:'+progress+'%"></div></div></div></section><section class="section"><div class="section-head"><div><h2>继续学习</h2><p>'+(hasLastViewed?'接着上次浏览的题目继续学习':'还记得这道题吗？')+'</p></div><a class="small-button" href="#library">查看全部题目 →</a></div><div class="continue-grid"><a class="continue-card featured card" href="#problem/'+featured.id+'"><div><div class="card-meta"><span>第'+featured.week+'周 · 第'+featured.question_number+'题</span><span>'+(hasLastViewed?'上次浏览':'推荐')+'</span></div><div class="card-title">'+escapeHtml(featured.title)+'</div><div class="card-description">'+questionSummary(featured)+'</div></div><div class="card-bottom"><span class="status-pill">'+escapeHtml(masteryOf(featured))+'</span><span class="mini-arrow">↗</span></div></a></div></section><section class="section"><div class="section-head"><div><h2>从这里开始</h2><p>四种进入方式</p></div></div><div class="tool-grid"><a class="tool-card card" href="#random"><div class="tool-icon">⌁</div><h3>just do it！</h3><p>从前三级掌握状态中随机抽一道题。</p></a><a class="tool-card card" href="#library"><div class="tool-icon">⌘</div><h3>按知识找题</h3><p>按三级知识路径查找完整题目。</p></a><a class="tool-card card" href="#library?ratings=need"><div class="tool-icon">↻</div><h3>按需要练习</h3><p>按掌握程度与三维星级筛选。</p></a><a class="tool-card card" href="#review"><div class="tool-icon">✦</div><h3>我的复习</h3><p>集中查看前两级掌握状态的题目。</p></a></div></section><section class="section"><div class="card" style="padding:20px"><div class="library-top"><span class="week-tag">已接入</span><span class="muted" style="font-size:13px">'+qs.length+' 道题 · '+state.data.knowledge_index.length+' 条三级知识路径</span></div></div></section></div>';
+  return '<div id="home"><section class="hero"><div class="hero-copy">'+header('今天你杜分析了吗','学完杜分析可以拿八百万年薪量化大结果吗qwq')+'</div><div class="progress-card"><div class="progress-top"><span>题库进度</span><span>'+assessed+'/'+qs.length+' 已标记</span></div><div class="progress-number">'+progress+'% 完全掌握</div><div class="progress-track"><div class="progress-fill" style="width:'+progress+'%"></div></div></div></section><section class="section"><div class="section-head"><div><h2>继续学习</h2><p>还记得这道题吗？</p></div><a class="small-button" href="#library">查看全部题目 →</a></div><div class="continue-grid"><a class="continue-card featured card" href="#problem/'+featured.id+'"><div><div class="card-meta"><span>第'+featured.week+'周 · 第'+featured.question_number+'题</span><span>'+(hasLastViewed?'上次浏览':'推荐')+'</span></div><div class="card-title">'+escapeHtml(featured.title)+'</div><div class="card-description">'+questionSummary(featured)+'</div></div><div class="card-bottom"><span class="status-pill">'+escapeHtml(masteryOf(featured))+'</span><span class="mini-arrow">↗</span></div></a></div></section><section class="section"><div class="section-head"><div><h2>从这里开始</h2><p>四种进入方式</p></div></div><div class="tool-grid"><a class="tool-card card" href="#random"><div class="tool-icon">⌁</div><h3>just do it！</h3><p>从前三级掌握状态中随机抽一道题。</p></a><a class="tool-card card" href="#library"><div class="tool-icon">⌘</div><h3>按知识找题</h3><p>按三级知识路径查找完整题目。</p></a><a class="tool-card card" href="#library?ratings=need"><div class="tool-icon">↻</div><h3>按需要练习</h3><p>按掌握程度与三维星级筛选。</p></a><a class="tool-card card" href="#review"><div class="tool-icon">✦</div><h3>我的复习</h3><p>集中查看前两级掌握状态的题目。</p></a></div></section><section class="section"><div class="card" style="padding:20px"><div class="library-top"><span class="week-tag">已接入</span><span class="muted" style="font-size:13px">'+qs.length+' 道题 · '+state.data.knowledge_index.length+' 条三级知识路径</span></div></div></section></div>';
 }
 function libraryView() {
   const shown=state.data.questions.filter(matches), topics=topicRoots();
@@ -284,6 +284,17 @@ function bindDetail() {
   const savedKey=()=>{try{return sessionStorage.getItem(DEEPSEEK_KEY_STORAGE)||''}catch(_){return ''}};
   if(keyInput && savedKey()) keyInput.value=savedKey();
   const setKeyStatus=message=>{if(keyStatus)keyStatus.textContent=message};
+  const appendFocusContent=(content)=>{
+    const focus=document.getElementById('assistant-focus-text');
+    const value=content?.trim();
+    if(!focus||!value)return false;
+    const existing=focus.value.trim();
+    if(existing.split(/\n\n+/).includes(value))return false;
+    focus.value=existing?existing+'\n\n'+value:value;
+    assistantFocusText=focus.value;
+    focus.dispatchEvent(new Event('input',{bubbles:true}));
+    return true;
+  };
   document.getElementById('save-deepseek-key')?.addEventListener('click',()=>{
     const key=keyInput?.value.trim();
     if(!key){setKeyStatus('请先粘贴 DeepSeek API Key。');return}
@@ -297,7 +308,7 @@ function bindDetail() {
   document.getElementById('capture-assistant-focus')?.addEventListener('click',()=>{
     const selected=window.getSelection()?.toString().trim();
     const focus=document.getElementById('assistant-focus-text');
-    if(selected){focus.value=selected;assistantFocusText=selected;document.getElementById('assistant-notice').textContent='已引用选中文字。'}
+    if(selected){appendFocusContent(selected);document.getElementById('assistant-notice').textContent='已累加引用选中文字。'}
     else document.getElementById('assistant-notice').textContent='请先在题目或答案中选中一段文字，再点击此按钮。';
   });
   const focusRow=document.querySelector('.assistant-focus-row');
@@ -319,9 +330,7 @@ function bindDetail() {
       try{const mathItems=window.MathJax?.startup?.document?.getMathItemsWithin(formula);if(mathItems?.length)tex=mathItems[0].math||''}catch(_){}
       if(!tex)tex=formula.getAttribute('aria-label')||formula.textContent.trim();
       const formatted=tex.startsWith('\\(')||tex.startsWith('\\[')?tex:'\\('+tex+'\\)';
-      const focus=document.getElementById('assistant-focus-text');
-      focus.value=focus.value.trim()?focus.value.trim()+'\n'+formatted:formatted;
-      assistantFocusText=focus.value;
+      appendFocusContent(formatted);
       document.body.classList.remove('formula-pick-mode');pickButton.classList.remove('is-active');pickButton.textContent='点选公式聚焦';
       document.getElementById('assistant-notice').textContent='已将公式加入聚焦内容。';
     };
@@ -332,6 +341,9 @@ function bindDetail() {
   const notice=document.getElementById('assistant-notice');
   const focusInput=document.getElementById('assistant-focus-text');
   focusInput?.addEventListener('input',()=>{assistantFocusText=focusInput.value});
+  document.getElementById('assistant-question')?.addEventListener('keydown',event=>{
+    if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();form?.requestSubmit();}
+  });
   form?.addEventListener('submit',async event=>{
     event.preventDefault();
     const key=savedKey()||keyInput?.value.trim();
@@ -362,7 +374,11 @@ function bindDetail() {
       if(window.MathJax?.typesetPromise) await window.MathJax.typesetPromise([pending]);
     }catch(error){
       pending.textContent='请求失败：'+error.message+'。如果是浏览器网络/CORS 错误，当前静态网页可能无法直接连接 API；可检查密钥和网络，或后续改用仅供个人部署的代理服务。';
-    }finally{send.disabled=false;document.getElementById('assistant-question').value='';}
+    }finally{
+      send.disabled=false;
+      document.getElementById('assistant-question').value='';
+      if(focusInput){focusInput.value='';assistantFocusText='';}
+    }
   });
 }
 function openSearch() {
